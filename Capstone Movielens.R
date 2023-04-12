@@ -1,0 +1,925 @@
+
+## This R script file was created from r markdown file "Capstone Movielens.Rmd" using the knitr::purl() function. 
+
+#' ## **The Beginning**
+#' 
+#' 
+#' ![Star Wars](galaxy.png.jpg){width="693"} ***Star Wars (1977), 20th Century Fox***
+#' 
+#' 
+#' 
+#' #### **Executive Summary**
+#' 
+#' 
+#' This project is for the Data Science: Capstone course in the Data Science Professional Certificate Program offered by HarvardX. 
+#' The objective of this project is to create a Movie Recommendation System, along the lines of the Netflix Challenge 
+#' (<https://bits.blogs.nytimes.com/2009/09/21/netflix-awards-1-million-prize-and-starts-a-new-contest/>), 
+#' to predict how users will rate a particular movie, based on previous ratings. 
+#' This will then be used in recommending other movies users might like. The users awarded the various movies a number of stars, 
+#' ranging from 0.5 Star to 5 Stars, in 0.5 Star increments. We will use the data set, Movielens, a subset of a database 
+#' created by the Grouplens research lab at the University of Minnesota, to build the algorithm. To determine the 
+#' accuracy of our various model iterations, we will consider the residuals. Residuals are the difference between the data points 
+#' and our movie rating predictions. We will evaluate the error of our algorithms using the loss function 
+#' Root Mean Square Error (RMSE, described in the code below). The term inside the radical is the variance of the residuals. 
+#' We take the square root and we get the standard deviation, and the lower RMSE the better. Our goal is to create a model that 
+#' improves upon the baseline RMSE of 0.86490, given in the project outline.
+#' 
+#' Install required R packages and download the Movielens data set. Note: this will take a few minutes
+#' 
+## ----install, message=FALSE, warning=FALSE----------------------------------------------------------
+
+if(!require(tidyverse)) install.packages("tidyverse", repos ="<http://cran.us.r-project.org>") 
+if(!require(caret)) install.packages("caret", repos = "<http://cran.us.r-project.org>")
+if(!require(data.table)) install.packages("data.table", repos ="<http://cran.us.r-project.org>")
+if(!require(kableExtra)) install.packages("kableExtra", repos ="<http://cran.us.r-project.org>")
+library(tidyverse) 
+library(caret) 
+library(data.table) 
+library(lubridate)
+library(stringr) 
+library(ggplot2) 
+library(kableExtra)
+library(robustbase) 
+library(knitr)
+
+# MovieLens 10M dataset:
+
+# <https://grouplens.org/datasets/movielens/10m/>
+
+# <http://files.grouplens.org/datasets/movielens/ml-10m.zip>
+
+options(timeout = 120)
+
+dl <- "ml-10M100K.zip" 
+if(!file.exists(dl))
+download.file("<https://files.grouplens.org/datasets/movielens/ml-10m.zip>",
+dl)
+
+ratings_file <- "ml-10M100K/ratings.dat" 
+if(!file.exists(ratings_file))
+unzip(dl, ratings_file)
+
+movies_file <- "ml-10M100K/movies.dat" 
+if(!file.exists(movies_file))
+unzip(dl, movies_file)
+
+ratings <- as.data.frame(str_split(read_lines(ratings_file),
+fixed("::"), simplify = TRUE), stringsAsFactors = FALSE)
+colnames(ratings) <- c("userId", "movieId", "rating", "timestamp")
+ratings <- ratings %>% mutate(userId = as.integer(userId), movieId =
+as.integer(movieId), rating = as.numeric(rating), timestamp =
+as.integer(timestamp))
+
+movies <- as.data.frame(str_split(read_lines(movies_file), fixed("::"),
+simplify = TRUE), stringsAsFactors = FALSE)
+
+colnames(movies) <- c("movieId", "title", "genres") 
+movies <- movies %>% mutate(movieId = as.integer(movieId))
+
+movielens <- left_join(ratings, movies, by = "movieId")
+
+
+#' 
+#' 
+#' Partition the data into 2 sets: 90% of the data will be in the edx data set, and 10% in the Final Holdout Test set. 
+#' The Final Holdout Test set will be used to measure the effectiveness of our algorithm.
+#' 
+## ----partition, warning=FALSE, message=FALSE--------------------------------------------------------
+
+# Final hold-out test set will be 10% of MovieLens data
+set.seed(1, sample.kind="Rounding") # if using R 3.6 or later
+# set.seed(1) # if using R 3.5 or earlier
+
+test_index <- createDataPartition(y = movielens$rating, times = 1, p = 0.1, list = FALSE)
+edx <- movielens[-test_index,]
+temp <- movielens[test_index,]
+
+# Make sure userId and movieId in final hold-out test set are also in edx set
+final_holdout_test <- temp %>% 
+  semi_join(edx, by = "movieId") %>%
+  semi_join(edx, by = "userId")
+
+# Add rows removed from final hold-out test set back into edx set
+removed <- anti_join(temp, final_holdout_test)
+edx <- rbind(edx, removed)
+
+rm(dl, ratings, movies, test_index, temp, movielens, removed)
+
+
+#' 
+#' 
+#' #### **The Data**
+#' 
+#' 
+#' ![Star Trek Generations (1994), Paramount](Data.jpeg){width="652"} ***Star Trek Generations (1994), Paramount***  
+#' 
+#' 
+#' Now we will look at the data to see what we have to work with, and consider what pre-processing might be useful.
+#' 
+#' There are 10,677 different movies and 69,878 users in the edx data.
+#' 
+## ----movies and users, echo=FALSE-------------------------------------------------------------------
+
+# Note the term Hold_position in kable_styling. This should keep tables from wandering.
+# See reference (1).
+
+edx %>% 
+  summarize("Number of Movies" = n_distinct(edx$movieId), "Number of Users" = n_distinct(edx$userId)) %>% kbl() %>% 
+  kable_styling(latex_options = c("striped", "HOLD_position"),  
+full_width = F, position = "center")
+
+
+#' 
+#' 
+#' The following tables list the names of the 6 variables as well as the first 5 rows of data for the edx and Final Holdout Test sets. Note that the release year of the movie is included as part of the "title". We will use that later.\
+#' 
+## ----edx data analysis, echo=FALSE------------------------------------------------------------------
+
+kable(head(edx, 5)) %>% kable_styling(latex_options = c("striped", "HOLD_position"), 
+                full_width = F, position = "left") %>% add_header_above(c("edx" = 1, "", "", "", "", "", ""))
+
+
+#' 
+#' 
+#' 
+## ----holdout head 5, echo=FALSE---------------------------------------------------------------------
+
+kable(head(final_holdout_test, 5)) %>% kable_styling(latex_options = c("striped", "HOLD_position", "scale down", 
+  font_size = 10), full_width = F, position = "left") %>% 
+  add_header_above(c("Final Holdout" = 1, "", "", "", "", ""))
+
+
+
+#' 
+
+#' 
+## ----dim holdout, include=FALSE, echo=FALSE---------------------------------------------------------
+
+dim(edx)
+dim(final_holdout_test)
+
+
+#' 
+#' 
+#' Here are the dimensions of the data sets:\
+#' 
+#' 
+## ----dims,echo=FALSE--------------------------------------------------------------------------------
+
+
+tibble(Dimensions = c("edx Data Set", "Final Holdout Data Set"),
+                     `Rows and Columns` = c("9,000,055 rows x 7 columns", "999,999 rows x 7 columns")) %>% kbl() %>% 
+     kable_styling(latex_options = c("striped", "HOLD_position", full_width = F, position = "center"))
+
+#' 
+#' 
+#' We now consider a seventh variable, the movies' Release Year, which was mentioned above. We separate the year 
+#' from the movie title then create a new column named Release_Year in both edx and Final Holdout Test sets.
+#' 
+## ----release, echo=FALSE----------------------------------------------------------------------------
+
+edx <- edx %>% mutate("Release_Year" = as.numeric(str_sub(title, -5, -2)))
+
+final_holdout_test <- final_holdout_test %>% mutate(Release_Year = as.numeric(str_sub(title,-5, -2)))
+
+#' 
+#' Tables with Release Year column added.
+#' 
+## ----release year edx table, echo=FALSE-------------------------------------------------------------
+
+kable(head(edx, 5)) %>% kable_styling(latex_options = c("striped", "HOLD_position", "scale_down"), full_width = F, position = "left") %>% 
+  add_header_above(c("edx" = 1, "", "", "", "", "", "", ""))
+
+#'
+#' 
+## ----release year holdout table, echo=FALSE---------------------------------------------------------
+
+kable(head(final_holdout_test, 5)) %>% kable_styling(latex_options = c("striped", "HOLD_position", "scale_down"), full_width = F, position = "left") %>% 
+  add_header_above(c("Final Holdout" =  1, "", "", "", "", "", ""))
+
+
+#' 
+#' 
+#' The data range are the years 1915 through 2008. There is a lot of variability year to year, showing growth over time, then, interestingly, trailing off beginning in the 2000's. here are the first 25 movies in the list, beginning in 1915.
+#'  For those who are curious, the R script version of this paper has the code to run the full list.
+#' 
+## ----years, echo=FALSE------------------------------------------------------------------------------
+
+edx %>% group_by("Release Year" = Release_Year) %>% 
+  summarize("Number of Movies" = n()) %>% head(n = 25) %>% 
+  kbl() %>% kable_styling(latex_options = c("striped", "HOLD_position"), full_width = F, position = "center")
+
+
+edx %>% group_by("Release Year" = Release_Year) %>% 
+  summarize("Number of Movies" = n()) %>%  
+  kbl() %>% kable_styling(latex_options = c("striped", "HOLD_position"), full_width = F, position = "center")
+
+
+#' 
+#' 
+#' 
+#' How many movies were not rated at all? None. All the movies in the data set were rated at least once. Some were rated over 10,000 times.\
+#' 
+#' 
+## ---- ratings, echo=FALSE, include=FALSE------------------------------------------------------------
+
+edx %>%
+  group_by(movieId) %>% summarize(count = n()) %>% filter(count < 1) %>% 
+  summarize("Number of Unrated Movies" = n()) 
+
+edx %>%
+  group_by(movieId) %>%
+  summarize(count = n()) %>%
+  filter(count == 1) %>%  summarize("Number of Movies Rated Once" = n())
+
+edx %>%
+  group_by(movieId) %>%
+  summarize(count = n()) %>%
+  filter(count >= 10000) %>% summarize( "Number of Movies 10,000+ Ratings" = n())
+
+
+#' 
+#' 
+#' 
+## ----ratings table, echo=FALSE----------------------------------------------------------------------
+
+tibble(Category = c("Number of Unrated Movies", "Number of Movies with One Rating",
+                    "Number of Movies 10,000+ Ratings"), Ratings = c(0, 126, 143)) %>% kbl() %>% 
+  kable_styling(latex_options = c("striped", "HOLD_position"), full_width = F, position = "center")
+
+#' 
+#' 
+#' Here is a list of the first 25 movies with only one rating. These might be considered outliers 
+#' (See R script version for the entire list).
+#' 
+## ----one rating, echo=FALSE,eval=FALSE--------------------------------------------------------------
+
+edx %>%
+  group_by(movieId) %>%
+  summarize(count = n()) %>%
+  filter(count == 1) %>%
+  left_join(edx, by = "movieId") %>% 
+  group_by("Title" = title) %>%
+  summarize(Rating = rating, "Number of Ratings" = count) %>% kbl() %>%
+  kable_styling(latex_options = c("striped", "HOLD_position"), full_width = F, position = "left")
+
+#' 
+#' 
+#' 
+## ----25 with 1 rating, echo=FALSE-------------------------------------------------------------------
+
+edx %>% 
+  group_by(movieId) %>%
+  summarize(count = n()) %>% 
+  filter(count == 1) %>%
+  left_join(edx, by = "movieId") %>% 
+  group_by("Title" = title) %>%
+  summarize(Rating = rating, "Number of Ratings" = count) %>% head(n = 25) %>% kbl() %>% 
+  kable_styling(latex_options = c("striped", "HOLD_position"), full_width = F, position = "center")
+
+
+#' 
+#' 
+#' 
+#' Which movies had the most ratings? Unsurprisingly, most appear to be hits. 
+#' Here are the Top 25 movies by number of ratings. Every one of the Top 100 has more than 10,000 ratings. 
+#' Note the release year in parentheses. We see by inspection that many, though certainly not all,
+#' of the movies with the most ratings were released in the 90's (See R script version for the entire list).
+#' 
+## ----top 100, message=FALSE, echo=FALSE, eval=FALSE-------------------------------------------------
+
+edx %>%
+  group_by(title) %>% summarize(count = n()) %>% 
+  top_n(100) %>% arrange(-count) %>% summarize(Title = title, "Number of Ratings" = count) %>%
+  kbl() %>% kable_styling(latex_options = c("striped", "HOLD_position"), full_width = F, position = "center")
+  
+
+#' 
+#' 21 Of the Top 25 movies were released in the 90's.
+#' 
+## ----top 25, echo=FALSE, message=FALSE--------------------------------------------------------------
+
+edx %>%
+  group_by(title) %>% summarize(count = n()) %>% 
+  top_n(25) %>% arrange(-count) %>% summarize(Title = title, "Number of Ratings" = count) %>%
+  kbl() %>% kable_styling(latex_options = c("striped", "HOLD_position"), full_width = F, position = "center")
+
+#' 
+#' 
+#' 
+#' This histogram shows how many movies got how many ratings. For example, the leftmost bar shows 126 movies got one rating, 
+#' and the three rightmost bars together show that 143 movies received 10,000 or more ratings. Perhaps the sheer number of 
+#' reviews leads people to watch a particular movie, leading us to consider whether movies with a large number of ratings 
+#' have more influence than movies with few ratings.
+#' 
+## ----ratings histogram, echo=FALSE------------------------------------------------------------------
+
+edx %>% count(movieId) %>% 
+  ggplot(aes(n)) + 
+  geom_histogram(bins = 30, color = "black", fill = "red") + 
+  scale_x_log10("Rating Count") + scale_y_continuous(breaks = c(seq(0, 800,50)), ylab("Movie Count")) +
+  ggtitle("Ratings per Movie") 
+
+
+#' 
+#' Now we will look at the nature of the ratings.
+#' 
+#' This table shows how many stars were awarded, 0 through 5, in 1/2 point increments. Whole star ratings are 
+#' more common than 1/2 star ratings.
+#' 
+## ----stars table, echo=FALSE------------------------------------------------------------------------
+
+edx %>% group_by("Rating" = rating) %>% summarize(count = n()) %>% 
+  arrange(-count) %>%kbl() %>% kable_styling(latex_options = c("striped", "HOLD_position"), full_width = F, position = "center")
+
+#' 
+#' 
+#' Here is the plot (in gold, of course). It shows that 4 stars was the most frequent rating, with just under 2.6 million.
+#' 
+## ----bar chart of stars, echo=FALSE-----------------------------------------------------------------
+edx %>% ggplot(aes(rating)) + geom_bar(width = .3, fill = "gold") + 
+  scale_x_continuous(breaks = c(seq(0, 5, 0.5))) + xlab("Rating") +
+  scale_y_continuous(breaks = c(seq(0, 3000000, 200000))) + ylab("Number of Ratings")
+
+#' 
+#' Number of ratings of movies per genre in order of most to least. The Drama genre was rated most often, Romance the least.\
+#' 
+## ----parse genres, echo=FALSE-----------------------------------------------------------------------
+
+genres <- c("Drama", "Comedy", "Thriller", "Romance")
+
+Number_of_Ratings <- sapply(genres, function(n) {
+  sum(str_detect(edx$genres, n)) 
+}) 
+
+tibble(genres, "Number of Ratings") %>% 
+  summarize(Genres = genres, "Number of Ratings" = Number_of_Ratings) %>% 
+  kbl() %>% kable_styling(latex_options = c("striped", "HOLD_position"), full_width = F, position = "center")
+
+
+#' 
+#' 
+#' #### **The Algorithm**
+#' 
+#' 
+#' ![The Matrix (1999), Warner Bros.](matrix.jpg){width="661"} ***The Matrix (1999), Warner Bros***.
+#' 
+#' Now we will begin developing our algorithm.
+#' 
+#' The loss function used in this project is the Root Mean Square Error, or RMSE. The RMSE tells us the average distance 
+#' between the observed data and the model's predictions. It is the square root of the variance, and can therefore be thought 
+#' of as the standard deviation.
+#' 
+#' ![Root Mean Square Error](rmse.jpg){width="188"}
+#' 
+## ----rmse, echo=TRUE--------------------------------------------------------------------------------
+
+RMSE <- function(true_ratings, predicted_ratings){
+  sqrt(mean((true_ratings - predicted_ratings)^2))
+}
+
+
+#' 
+#' For our initial model, we will start by using the average of all ratings for our base case. First we will create the train 
+#' and test sets from the edx data set. This does not include the final_holdout_test set created earlier, which is held separate. 
+#' In this case we will use 80% of the data as the train set, and 20% as the test set.
+#' 
+## ----set seed, warning=FALSE------------------------------------------------------------------------
+
+set.seed(1, sample.kind = "Rounding")
+test_index_edx <- createDataPartition(y= edx$rating, times=1, p= 0.2, list=FALSE)
+train_edx <- edx[-test_index_edx,] # Create training set
+test_edx <- edx[test_index_edx,] # Create test set with which we will evaluate our  model
+
+test_edx <- test_edx%>% 
+  semi_join(train_edx, by = "movieId") %>%
+  semi_join(train_edx, by = "userId")
+
+
+#' 
+#' 
+#' We use the train_edx data to develop the model. Here we predict that each movie gets the same rating irrespective of the movie or the user. Any differences are due to random error. Here is the general model:
+#' 
+#' #### **Average of All Ratings**
+#' 
+#' 
+#' $$
+#' Y_{u,i}=naive+\epsilon_{u,i} 
+#' $$
+#' 
+#' 
+## ----naive rmse, warning=FALSE, echo=TRUE-----------------------------------------------------------
+
+mu_hat <- mean(train_edx$rating)  # Average of all ratings for all users and movies.
+
+naive_rmse <- RMSE(test_edx$rating, mu_hat) %>% round(5) # Calculate rmse, 
+# rounded to 5 decimal places. All RMSE results will be rounded to 5 places.
+
+#' 
+#' This is the first entry for the Table of RMSE results.
+#' 
+## ----naive table, echo=TRUE-------------------------------------------------------------------------
+
+rmse_results <- tibble(Method = "Average of All Ratings", RMSE = naive_rmse) 
+
+rmse_results %>% kbl() %>% kable_styling(latex_options = 
+      c("striped", "HOLD_position"), full_width = F, position = "center")
+
+
+#' 
+#' The result, 1.0599, is of course greater than 1, which indicates the standard deviation of the naive_rmse model is 
+#' more than 1 gold star. A lot of room for improvement.
+#' 
+#' 
+#' 
+#' #### **Movie Effects**
+#' 
+#' 
+#' 
+#' Now we consider bias of movie effects (which we will call moviefx), adding it to the model. 
+#' Some movies are rated higher than others. Perhaps it is particular actors, perhaps the overall 
+#' tone of the movie, emotions generated in the various genres. Humans are doing the rating, so who knows why?
+#' 
+#' $$
+#' Y_{u,i}=naive_{u,i}+moviefx_{u,i}+\epsilon_{u,i}
+#' $$
+#' 
+## ----movie effects, echo=TRUE-----------------------------------------------------------------------
+
+mu_hat <- mean(train_edx$rating) 
+
+moviefx <- train_edx %>% 
+  group_by(movieId)  %>%  
+  summarize(moviefx = mean(rating - mu_hat))%>% round(5) # Calculate moviefx
+
+#' 
+#' 
+#' 
+#' Here is a histogram of the movie effects. mu_hat is 3.5125, which on the chart coincides with 0.\
+#' 
+## ----movie fx hist, echo=FALSE----------------------------------------------------------------------
+
+moviefx %>%  
+  ggplot(aes(moviefx)) + 
+  geom_histogram(bins = 30, color = "black", fill = "red") + 
+  scale_x_continuous("Movie Effects") + scale_y_continuous(breaks = c(seq(0, 5000, 100)), ylab("Movie Count")) +
+  ggtitle("Movie Effects") 
+
+#' 
+#' 
+#' Add Movie Effects to the Table.
+#' 
+## ----add movie fx-----------------------------------------------------------------------------------
+
+predicted_moviefx <- mu_hat + test_edx  %>%  
+  left_join(moviefx, by = "movieId")  %>% 
+  .$moviefx
+
+plus_movie_effects <- RMSE(predicted_moviefx, test_edx$rating) %>% round(5) # RMSE moviefx
+
+
+#' 
+#' Including the movie effects marginally improves our RMSE to 0.94374.
+#' 
+## ----movie fx table, echo=FALSE---------------------------------------------------------------------
+
+rmse_results <- bind_rows(rmse_results, tibble(Method = "Average of All Ratings + Movie Effects",
+RMSE = plus_movie_effects))
+
+rmse_results %>% kbl() %>% kable_styling(latex_options = c("striped", "HOLD_position"), full_width = F, position = "left")
+
+
+
+#' 
+#' #### **User Effects**
+#' 
+#' 
+#' Now we consider the effects of the users, userfx. Wide dispersion in ratings. Some users rate every movie 5 stars, some are more discriminating.
+#' 
+#' $$
+#' Y_{u,i}=naive_{u,i}+moviefx_{u,i}+userfx_{u,i}+\epsilon_{u,i}
+#' $$
+#' 
+## ----user, echo=TRUE--------------------------------------------------------------------------------
+
+userfx <- train_edx  %>%  
+  left_join(moviefx, by = "movieId") %>%
+  group_by(userId) %>% 
+  summarize(userfx = mean(rating - mu_hat - moviefx)) %>% round(5)
+
+#' 
+#' 
+#' Histogram of movie effects and user effects:
+#' 
+## ----user fx hist, echo=FALSE-----------------------------------------------------------------------
+  
+userfx %>%  
+  ggplot(aes(userfx)) + 
+  geom_histogram(bins = 30, color = "black", fill = "red") + 
+  scale_x_continuous("Users") + scale_y_continuous(breaks = c(seq(0, 15000, 1000)), ylab("Movie Count")) + ggtitle("User Effects")
+
+
+#' 
+#' 
+#' 
+## ----add user fx to table, echo=TRUE----------------------------------------------------------------
+
+predicted_userfx <- test_edx  %>%  
+  left_join(moviefx, by = "movieId")  %>% 
+  left_join(userfx, by = "userId")  %>% 
+  mutate(pred = mu_hat + moviefx + userfx) %>%  
+  .$pred
+
+movie_plus_userfx <- RMSE(predicted_userfx, test_edx$rating)%>% round(5)
+
+
+
+#' 
+#' This substantially improves our model to 0.86593.
+#' 
+## ----user table, echo=FALSE-------------------------------------------------------------------------
+
+rmse_results <- rbind(rmse_results, 
+    tibble(Method = "Average of All Ratings + Movie Effects + User Effects", 
+           RMSE = movie_plus_userfx))
+
+rmse_results %>% kbl() %>% kable_styling(latex_options = 
+    c("striped", "HOLD_position"), full_width = F, position = "left")
+
+
+#' 
+#' #### **Genre Effects**
+#' 
+#' 
+#' 
+#' Now we consider the effect of the different movie genres. Some raters may simply prefer one genre over another, and their ratings reflect this.\
+#' 
+#' $$
+#' Y_{u,i}=naive_{u,i}+moviefx_{u,i}+userfx_{u,i}+genrefx_{u,i}+\epsilon_{u,i}
+#' $$
+#' 
+## ----genrefx, echo=TRUE-----------------------------------------------------------------------------
+
+genrefx <- train_edx %>%
+  left_join(moviefx, by = "movieId") %>%
+  left_join(userfx, by = "userId") %>%
+  group_by(genres) %>% 
+  summarize (genrefx = mean (rating- mu_hat - moviefx - userfx)) 
+
+#' 
+## ----genre test, echo=TRUE--------------------------------------------------------------------------
+
+predict_genrefx <-test_edx %>%
+  left_join(moviefx, by ="movieId") %>%
+  left_join(userfx, by = "userId") %>%
+  left_join(genrefx, by = "genres") %>%
+  mutate(pred = mu_hat + moviefx + userfx + genrefx) %>%
+  .$pred
+
+#' 
+## ----rmse genres result-----------------------------------------------------------------------------
+
+rmse_genres <- RMSE(predict_genrefx, test_edx$rating) %>% round(5)
+
+
+#' 
+#' 
+#' 
+#' Histogram of genre effects:
+#' 
+#' 
+## ----genre hist, echo=FALSE-------------------------------------------------------------------------
+
+genrefx %>%  
+  ggplot(aes(genrefx)) + 
+  geom_histogram(bins = 30, color = "black", fill = "red") + 
+  scale_x_continuous("Genre Effects") + scale_y_continuous(breaks = c(seq(0, 300, 10)), 
+          ylab("Movie Count")) + ggtitle("Genre Effects") 
+
+
+#' 
+#' 
+#' The genres had little impact on the loss function, only improving to 0.8655941. Not the result I expected.
+#' 
+## ----add genre, echo=FALSE--------------------------------------------------------------------------
+
+rmse_results <- rbind(rmse_results, tibble(Method = "Average of All Ratings + Movie Effects + User Effects + 
+                                           Genres Effects", RMSE = rmse_genres))
+
+
+rmse_results %>% kbl() %>% kable_styling(latex_options = c("striped", "HOLD_position"), full_width = F, position = "left")
+
+#' 
+
+#' 
+#' #### **Release Year Effects**
+#' 
+#' 
+#' 
+#' The cumulative RMSE has still not met our objective. Now we will consider Release Year Effects in our model. Recall that earlier we separated the release year from the title. Implicit in this is consideration of demographics, to which we do not have access. For example, perhaps older viewers generally prefer older movies, and younger viewers prefer more recent movies.
+#' 
+#' $$
+#' Y_{u,i}=naive_{u,i}+moviefx_{u,i}+userfx_{u,i}+genrefx_{u,i}+releasefx_{u,i}+\epsilon_{u,i}
+#' $$
+#' 
+## ----release year train, echo=TRUE------------------------------------------------------------------
+
+releasefx <- train_edx %>% 
+  left_join(moviefx, by ="movieId") %>%
+  left_join(userfx, by = "userId") %>%
+  left_join(genrefx, by = "genres") %>%
+  group_by(Release_Year) %>% 
+  summarize(releasefx = mean (rating- mu_hat - moviefx - userfx - genrefx))
+
+#' 
+#' 
+#' Histogram of Release Year effects.
+#' 
+#' 
+## ----real yr hist, echo=FALSE-----------------------------------------------------------------------
+releasefx %>%  
+  ggplot(aes(releasefx)) + 
+  geom_histogram(bins = 30, color = "black", fill = "red") + 
+  scale_x_continuous("Release Year Effects") + scale_y_continuous(breaks = 
+  c(seq(0, 30, 1)), ylab("Movie Count")) + ggtitle("Release Year Effects") 
+
+
+#' 
+#' 
+## ----rel yr test, echo=TRUE-------------------------------------------------------------------------
+
+predict_release_fx <-test_edx %>%
+  left_join(moviefx, by = "movieId") %>%
+  left_join(userfx, by = "userId") %>%
+  left_join(genrefx, by = "genres") %>%
+  left_join(releasefx, by = "Release_Year") %>% 
+  mutate(pred = mu_hat + moviefx + userfx + genrefx + releasefx) %>%
+  .$pred
+
+rmse_release <- RMSE(predict_release_fx, test_edx$rating) %>% round(5)
+
+#' 
+#' Including the Release Year improved the model slightly, to 0.8654189, so we have more work to do.
+#' 
+## ----realyr add to table, echo=FALSE----------------------------------------------------------------
+
+rmse_results <- rbind(rmse_results, tibble(Method = "Average of All Ratings + Movie Effects + User Effects + 
+                                           Genres Effects + Release Year Effects", RMSE = rmse_release))
+
+rmse_results %>% kbl() %>% kable_styling(latex_options = c("striped", "HOLD_position"), full_width = F, position = "left")
+
+#' 
+#' 
+#' 
+#' #### **Regularization**
+#' 
+#' 
+#' Our loss function still needs to come down to meet our objective, so we will apply 
+#' regularization to reduce the effect of the movies with few ratings--the outliers. 
+#' The regularization factor, lambda ($\lambda$), will be determined by using cross-validation. 
+#' This will take a few minutes, so sit back and watch a movie trailer.
+#' 
+#' $$ 
+#' \begin{aligned}
+#' \frac{1}{N}\sum_{u,i}(y_{u,i}-naive-moviefx_{i}-userfx_{u}-genrefx_{g}-releaseyearfx_{y})^{2}+\\
+#' \lambda(\sum_{i}moviefx^{2}_{i}+\sum_uuserfx^{2}_{u}+\sum_ggenrefx_{g}^{2}+\sum_{y}releaseyearfx_{y}^{2})
+#' \end{aligned}
+#' $$
+#' 
+## ----reg, warning=FALSE-----------------------------------------------------------------------------
+
+lambdas <- seq(0, 10, 0.25)
+
+rmses <- sapply(lambdas, function(l){
+  mu_hat <- mean(train_edx$rating)
+  
+  moviefx <- train_edx %>% 
+    group_by(movieId) %>% 
+    summarize(moviefx = sum(rating - mu_hat)/(n()+l))
+  
+  userfx <- train_edx %>% 
+    left_join(moviefx, by = "movieId") %>% 
+    group_by(userId) %>% 
+    summarize(userfx = sum(rating - moviefx - mu_hat)/(n()+l))
+  
+  genrefx <- train_edx %>% 
+    left_join(moviefx, by = "movieId") %>% 
+    left_join(userfx, by = "userId") %>% 
+    group_by(genres) %>% 
+    summarize(genrefx = sum(rating - moviefx - userfx - mu_hat) / (n() + l))
+  
+  releasefx <- train_edx %>% 
+    left_join(moviefx, by="movieId") %>%
+    left_join(userfx, by= "userId") %>%
+    left_join(genrefx, by= "genres") %>%
+    group_by(Release_Year) %>% 
+    summarize(releasefx = sum(rating- mu_hat - moviefx - userfx - genrefx)/(n() + l))
+  
+  
+  predicted_ratings <- test_edx %>%  
+    left_join(moviefx, by = "movieId") %>% 
+    left_join(userfx, by = "userId") %>% 
+    left_join(genrefx, by = "genres") %>%
+    left_join(releasefx, by = "Release_Year") %>% 
+    mutate(pred = mu_hat + moviefx + userfx + genrefx + releasefx) %>% 
+    pull(pred)
+  
+  return(RMSE(predicted_ratings, test_edx$rating))
+})
+
+
+#' 
+#' 
+#' This chart shows the Root Mean Square Errors for different values of lambda. The optimal value for 
+#' lambda is the value resulting in the lowest RMSE.
+#' 
+## ----lambda chart, warning=FALSE--------------------------------------------------------------------
+
+qplot(lambdas, rmses)  # Plot lambdas
+
+
+#' 
+## ----echo = FALSE, warning = FALSE, message = FALSE, comment=''-------------------------------------
+
+lambda <- lambdas[which.min(rmses)] # Determine optimal lambda to minimize RMSE
+lambda
+
+
+#' 
+#' 
+#' 4.5 is the optimal lambda. Now we incorporate it into the model.
+#' 
+## ----reg model, echo=TRUE---------------------------------------------------------------------------
+
+
+moviefx <- train_edx  %>% 
+  group_by(movieId)  %>% 
+  summarize(moviefx = sum(rating - mu_hat)/(n() + lambda))
+
+userfx <- train_edx %>% 
+  left_join(moviefx, by = "movieId")  %>% 
+  group_by(userId)  %>% 
+  summarize(userfx = sum(rating - moviefx - mu_hat)/(n() + lambda))
+
+genrefx <- train_edx %>% 
+  left_join(moviefx, by = "movieId") %>% 
+  left_join(userfx, by = "userId") %>% 
+  group_by(genres) %>% 
+  summarize(genrefx = sum(rating - moviefx - userfx - mu_hat) / (n() + lambda))
+
+releasefx <- train_edx %>% 
+  left_join(moviefx, by="movieId") %>%
+  left_join(userfx, by= "userId") %>%
+  left_join(genrefx, by= "genres") %>%
+  group_by(Release_Year) %>% 
+  summarize(releasefx = sum(rating- mu_hat - moviefx - userfx - genrefx) /
+              (n() + lambda))
+
+predicted_ratings <- test_edx %>%  
+  left_join(moviefx, by = "movieId") %>% 
+  left_join(userfx, by = "userId") %>% 
+  left_join(genrefx, by = "genres") %>%
+  left_join(releasefx, by = "Release_Year") %>% 
+  mutate(pred = mu_hat + moviefx + userfx + genrefx + releasefx) %>% 
+  pull(pred)
+
+
+rmse_regularized <- RMSE(predicted_ratings, test_edx$rating) %>% round(5)
+
+rmse_results <- rbind(rmse_results, 
+    tibble(Method = "Average of All Ratings + User Effects + Genres Effects + 
+    Release Year Effects + Regularization", RMSE = rmse_regularized))
+
+rmse_results %>% kbl() %>% kable_styling(latex_options = 
+    c("striped", "HOLD_position"), full_width = F, position = "left")
+
+
+
+#' 
+#' 
+#' Regularization has brought the RMSE to 0.8647970.
+#' 
+#' 
+#' #### **Final Holdout Test Set**
+#' 
+#' 
+#' 
+#' At the beginning of this paper, the movielens dataset was separated into two parts-- 90% into the edx set, and 10% in the final_holdout_test set. Now we run the algorithm against the Final Holdout Set.\
+#' 
+## ----valid, echo=TRUE-------------------------------------------------------------------------------
+
+moviefx <- edx %>% 
+  group_by(movieId)  %>% 
+  summarize(moviefx = sum(rating - mu_hat)/ (n() + lambda))
+
+userfx <- edx %>% 
+  left_join(moviefx, by = "movieId")  %>% 
+  group_by(userId)  %>% 
+  summarize(userfx = sum(rating - moviefx - mu_hat)/ (n() + lambda))
+
+genrefx <- edx %>% 
+  left_join(moviefx, by = "movieId") %>% 
+  left_join(userfx, by = "userId") %>% 
+  group_by(genres) %>% 
+  summarize(genrefx = sum(rating - moviefx - userfx - mu_hat) / (n() + lambda))
+
+releasefx <- edx %>% 
+  left_join(moviefx, by="movieId") %>%
+  left_join(userfx, by= "userId") %>%
+  left_join(genrefx, by= "genres") %>%
+  group_by(Release_Year) %>% 
+  summarize(releasefx = sum(rating- mu_hat - moviefx - userfx - genrefx) /
+              (n() + lambda))
+
+
+
+#' 
+#' See how the well the model works using the Final Holdout Test set:
+#' 
+## ----holdout, echo=TRUE-----------------------------------------------------------------------------
+
+
+predicted_ratings <- final_holdout_test %>%  
+  left_join(moviefx, by = "movieId") %>% 
+  left_join(userfx, by = "userId") %>% 
+  left_join(genrefx, by = "genres") %>%
+  left_join(releasefx, by = "Release_Year") %>% 
+  mutate(pred = mu_hat + moviefx + userfx + genrefx + releasefx) %>% 
+  pull(pred)
+
+rmse_final <- RMSE(predicted_ratings, final_holdout_test$rating) %>% round(5)
+
+
+rmse_results <- rbind(rmse_results, 
+                      tibble(Method = "Final Algorithm Result",
+                             RMSE = rmse_final))
+
+  
+rmse_results %>% kbl() %>% kable_styling(latex_options = c("striped", "HOLD_position"), 
+                                        full_width = F, position = "left") %>% 
+                                         add_header_above(c("Results" = 1, ""))
+
+
+
+#' 
+#' The RMSE of the model on the Final Holdout Test set is 0.8642948, below the assigned maximum of 0.86490.
+#' 
+#'
+#' 
+#' #### **Conclusion**
+#' 
+#' 
+#' By successively incorporating more predictors into the algorithm, we incrementally improved the algorithm's effectiveness. 
+#' Starting with the Average of all, then in succession incorporating Movie Effects, User Effects, Release Year, and Regularization, 
+#' the algorithm achieved the goal of reducing the RMSE below 0.86490. The model could be further improved by including other predictors 
+#' from the data set in additional iterations. Additionally, access to demographic data could prove interesting. For example, it is possible 
+#' that certain age groups or genders might not care for the violence or language in certain movies. Yet another age group or gender might 
+#' not like movies with sappy plot lines and gooey dialogue.
+#' 
+#' ![Pulp Fiction (1994), Miramax](pulp.jpg){width="656"} ***Pulp Fiction (1994), Miramax***
+#' 
+#' This would, however, introduce concerns about privacy, concerns that are not unfounded: In 2006 Arvind Narayanan and Vitaly Shmatikov 
+#' at the University of Texas were able to "de-anonymize" a number of Netflix subscribers in the Netflix Prize data set 
+#' using machine learning algorithms (<https://www.cs.utexas.edu/~shmat/shmat_oak08netflix.pdf>). On the other hand, one might reasonably argue 
+#' that privacy is a myth (<https://themarkup.org/show-your-work/2022/04/28/how-we-built-a-meta-pixel-inspector>).
+#' 
+#' Another line of analysis might be the ratings themselves. We can see from the histogram on page 10 that ½ star ratings were awarded far 
+#' less frequently than whole star ratings. Is there is some sort of rounding-up or rounding-down impulse on the part of raters that might 
+#' affect prediction models? Does the option of assigning ½ star ratings over complicate the rating process? Why not ¼ star increments? 
+#' Why not a rating system of 1 through 10, with 1 being the lowest rating, and 10 the highest? We see anecdotal evidence of this elsewhere. 
+#' For example, someone asks the time-- the actual time is 11:53 AM, but you might respond "noon". Another example, perhaps a bit arcane, 
+#' is prices for stock options that are listed on an exchange. Often the option "strike prices" with the highest open interest are in increments of
+#' $5 or $10. There is no financial or economic reason for this--it appears to be behavioral.
+#' 
+#' Or maybe HAL will just give us our opinions.
+#' 
+#' ![2001: A Space Odyssey (1968), MGM](HAL.jpg){width="642"} ***2001: A Space Odyssey (1968), MGM***
+#' 
+#' 
+#' #### **References**
+#' 
+#' (1) Introduction to Data Science:Rafael A. Irizarry, Professor and Chair of the Department of Data Science at Dana-Farber Cancer Institute and Professor of Applied Statistics at Harvard.
+#' 
+#' (2) <https://haozhu233.github.io/kableExtra/awesome_table_in_pdf.pdf>
+#' 
+#' (3) <https://www.r-bloggers.com/2020/06/r-markdown-tips-tricks-and-shortcuts/>
+#' 
+#' (4) <https://tex.stackexchange.com/questions/523736/xparse-inputenc-error-from-unicode-character-> in-package-description.
+#' 
+#' (5) <https://bookdown.org/yihui/rmarkdown/>
+#' 
+#' (6) <https://rpruim.github.io/s341/S19/from-class/MathinRmd.html>
+#' 
+#' (7) Statology.com: a great resource for referencing R code.
+#' 
+#' (8) R-bloggers.com: another valuable resource for R.
+#' 
+#' (9) <https://rpruim.github.io/s341/S19/from-class/MathinRmd.html>
+#' 
+#' (10) <https://raw.githubusercontent.com/rstudio/cheatsheets/main/rmarkdown-2.0.pdf>
+#' 
+#' (11) <https://bookdown.org/yihui/rmarkdown/>
+#' 
+#' ![Casablanca (1942), Warner Bros.](casablanca.jpg){width="601"} ***Casablanca (1944), Warner Bros.***
+#' 
+#' ### **The End**

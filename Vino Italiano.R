@@ -1,0 +1,2136 @@
+
+## This R script file was created from r markdown file "Vino Italiano.Rmd" using the knitr::purl() function. 
+#' 
+#' ![Piedmont](piedmont.jpg)
+#' **Piedmont Region**
+#' 
+#' 
+#' 
+#' 
+#' #### **Abstract**
+#' 
+#' Wine is remarkable in that along with its complex chemistry, it has almost mystical attributes 
+#' poured on by the wine cognoscenti, with an hyperbolic argot to match. Wine is big business with 
+#' big margins, and wine prices vary wildly across years, regions, and vineyards(6)(7). 
+#' Many countries have created complicated laws regarding how wines are labeled, e.g., which grape varietals 
+#' are used to produce a wine, where the grapes used to produce a wine were grown, and so on. 
+#' In Italy, these laws are the Denominazione di Origine Controllata e Garantita (DOCG). 
+#' Wine experts can perhaps discriminate among wines based on taste, nose, color, but this is necessarily subjective.
+#' A more objective process would be useful. The objective of this exercise is to create a model that will 
+#' identify wines produced from three different "cultivars", grape varietals in this case, and which I will 
+#' refer to as Categories 1, 2, and 3. The data are from the "wine.data" dataset in the University of California 
+#' at Irvine Machine Learning Repository <https://archive.ics.uci.edu/ml/index.php>).
+#' 
+#' 
+#' The "wine.data" dataset comprises thirteen chemical and physical properties each from 178 different wine samples. 
+#' It turns out that the wines analyzed are from the Piedmont region in Northern Italy, and were produced in the 1970's. 
+#' Piedmont is in Northwestern Italy, at the foot of the Alps, and is Italy's 6th largest wine producing region. Piedmont has 
+#' more DOCG classified vineyards than any other part of Italy. Approximately 65% of Piedmont wines are red and 35% white.
+#' 
+#' In a 2012 paper, Oliveri and Forina (4) identified the three cultivars as Barolo, Grignolino, and Barbera. However, though 
+#' Grignolino and Barbera are grape varietals, Barolo is not. More about this when we consider the data.
+#' 
+#' This analysis will proceed as follows:
+#' 
+#' 1.  Load R packages.
+#' 
+#' 2.  Download wine.data from the UCI Repository.
+#' 
+#' 3.  Look at the data overall, and any necessary pre-processing.
+#' 
+#' 4.  Consider each of the thirteen variables individually.
+#' 
+#' 5.  Use a kNN (Known nearest neighbors) algorithm in R to categorize each of the 178 wine samples into the appropriate Category.
+#' 
+#' 6.  Use the log() transform on data where appropriate. This will improve the results.
+#' 
+#' 7.  Run the KNN model again.
+#' 
+#' 8.  Then use a Random Forest algorithm on the original data.
+#' 
+#' List and description of the 13 parameters excluding column 1, which is the Category column. All thirteen parameters are used 
+#' in each algorithm.:
+#' 
+#' 
+#' 1. Alcohol. Alcohol is a by-product of fermentation, is related to the sugar content of the grape, and can be an indication of the wine's quality (6)(7).
+#' 
+#' 2.  Malic Acid. One of the two primary acids in wine. Malic acid has a tart taste, and is commonly converted to lactic acid through malolactic fermentation in order to soften the wine (6)(7).
+#' 
+#' 3.  Ash. Trace minerals in wine.
+#' 
+#' 4.  Alkalinity of Ash. Subset of Ash.
+#' 
+#' 5.  Magnesium. A mineral that has a role in ethanol production.
+#' 
+#' 6.  Total Phenols. Elements of a wine's body and flavor.
+#' 
+#' 7.  Flavanoids. One of the primary red wine phenols coming from the grape skins. Has purported and somewhat controversial health benefits (10)(11). See for example, the French Paradox (12). (If it's good enough for the French, it's good enough for me).
+#' 
+#' 8.  Nonflavanoids. A class of phenols.
+#' 
+#' 9.  Proanthocyanidins. Associated with astringency. From the seeds.
+#' 
+#' 10. Wine color. Spectrometer analysis of wine.
+#' 
+#' 11. Hue. Characteristic of age and grape in wine.
+#' 
+#' 12. OD280/OD315 of Diluted Wines. Cumbersome term that considers protein levels.
+#' 
+#' 13. Proline. Amino acid component of wine flavor.\
+#' 
+#' Install required R packages.
+#' 
+if(!require(tidyverse)) install.packages("tidyverse", repos = "http://cran.us.r-project.org")
+if(!require(caret)) install.packages("caret", repos = "http://cran.us.r-project.org")
+if(!require(data.table)) install.packages("data.table", repos = "http://cran.us.r-project.org")
+if(!require(psych)) install.packages("psych", repos = "http://cran.us.r-project.org")
+if(!require(corrplot)) install.packages("corrplot", repos = "http://cran.us.r-project.org")
+if(!require(formatR)) install.packages("formatR", repos = "http://cran.us.r-project.org")
+
+library(tidyverse)
+library(caret)
+library(data.table)
+library(lubridate)
+library(stringr)
+library(ggplot2)
+library(kableExtra)
+library(psych)
+library(corrplot)
+library(randomForest)
+library(formatR)
+
+#' 
+#' 
+#' Download wine.data into a csv file, vino.csv, then read that into file named vino.
+#' 
+
+
+download.file("https://archive.ics.uci.edu/ml/machine-learning-databases/wine/wine.data",
+              "vino.csv")
+
+vino <- fread("vino.csv")
+
+
+#' 
+#' 
+#' There are 178 rows (observations, or wine samples) and 14 separate columns (parameters). Column 1 is the Category of wine being analyzed, as discussed above.\
+#' 
+
+kable(head(vino, 10, format = "latex", booktabs = TRUE)) %>%
+  kable_styling(latex_options = c("striped", "HOLD_position"),  
+full_width = F, position = "left")
+
+#' Here we apply names and units to the respective columns. The UCI file tells us that the first parameter (column 1) classifies each observation (rows 1 through 178) as one of three different cultivars, listed as 1, 2, or 3 as discussed above. I will label column 1 as "Category". For simplicity, OD280/OD315 of Diluted Wines is abbreviated to OD280.\
+#' 
+## ----colnames------------------------------------------------------------------------------------
+
+colnames(vino)[1:14] <- c("Category", "Alcohol (% abv)","Malic acid (g/l)", "Ash (g/l)", 
+  "Alcalinity of ash (meq/l)", "Magnesium (mg/l)", "Total phenols (g/l)", "Flavanoids", 
+  "Nonflavanoid phenols", "Proanthocyanins (md/l)", "Color intensity", "Hue", "OD280", 
+  "Proline (mg/l)")
+
+
+#' 
+#' Table of variables. To see it better, refer to the R Markdown file and show the chart in a new window:\
+#' 
+## ----table---------------------------------------------------------------------------------------
+
+kable(head(vino, 10, booktabs = TRUE)) %>%
+  kable_styling(latex_options = c("striped", "HOLD_position", "scale_down"),  
+  full_width = F, position = "left") 
+  
+
+
+#' 
+#' Here we remove the units for each variable, reducing the clutter.
+#' 
+## ----declutter, echo=TRUE------------------------------------------------------------------------
+
+
+colnames(vino)[1:14] <- c("Category", "Alcohol","Malic_acid", "Ash", "Alcalinity_of_ash",
+                          "Magnesium", "Total_phenols", "Flavanoids", "Nonflavanoid_phenols", 
+                          "Proanthocyanins", "Color_intensity", "Hue", "OD280", "Proline")
+
+
+#' 
+#' Add column names to a file named vino_rf, which will be used in the Random Forest algorithm.
+#' 
+## ----rf names, echo=TRUE-------------------------------------------------------------------------
+
+vino_rf <- vino
+
+#' 
+#' Now we will consider the data.
+#' 
+#' This interesting chart shows the histograms, scatter plots, correlations, correlation ellipses, and regression lines of 
+#' the variables in vino dataframe, including Category. The histograms and boxplots of the variables are considered 
+#' individually below.
+#' 
+#' One possibility for pre-processing the data might be to consider highly correlated variables, for example Flavanoids and 
+#' Total Phenols, which have a correlation of 0.86, and use only one of them in the analysis. However, the data set is small 
+#' enough that this isn't necessary. Notice that the histograms show that several variables are not normally distributed, 
+#' and are negatively correlated with Category. As we will see, it is those variables that are most important to the model.
+#' 
+
+
+pairs.panels(vino, hist.col = "red") # Histogram color is changed to red since we are 
+# analyzing red wines.
+
+
+#' 
+#' 
+#' As discussed earlier, the parameters for each wine are obtained through chemical and physical analysis and listed as belonging to Category 1, 2, or 3. Barolo, however, is not a type of grape, but is instead the name of one of the regions classified under the Denominazione di Origine Controllata e Garantita (DOCG), essentially Italian wine laws. Wines from Barolo are produced primarily from the Nebbiolo grape. I emailed Professore Paolo Oliveri, now at the University of Genova (Genoa), to get his thoughts on the matter. He said that Barolo, Grignolno, and Barbera were indeed the categories 1, 2, and 3 respectively. both Grignolino and Barbera are also denominatons as well, and the authors of the original paper (Forina, et al, 1986) likely preferred referring to the denominations instead of the cultivars. Professore Oliveri's email is in Appendix 1. More about this in the conclusion.\
+#' The sample size of wines tested is small, and the numbers of wine samples are not evenly distributed across categories:\
+#' 
+#' 
+## ----sample size---------------------------------------------------------------------------------
+
+vino_1 <- vino %>% filter(Category == 1) %>% nrow() # There are 59 samples in Category 1.
+vino_2 <- vino %>% filter(Category == 2) %>% nrow() # There are 71 samples in Category 2.
+vino_3 <- vino %>% filter(Category == 3) %>% nrow() # There are 48 samples in Category 3.
+
+vino_sample <- tibble(`Sample Size` = "Category  1", "Count" = vino_1)
+
+
+vino_sample <- rbind(vino_sample, tibble(`Sample Size` = "Category  2",
+                                         "Count" = vino_2))
+
+vino_sample <- rbind(vino_sample, tibble(`Sample Size` = "Category  3",
+                                         "Count" = vino_3))
+
+#' 
+#' 
+#' Table of Sample Size by Category:
+#' 
+## ----sample size table---------------------------------------------------------------------------
+
+vino_sample %>% kbl() %>% kable_styling(latex_options = c("striped", "HOLD_position"),  
+full_width = F, position = "center")
+
+
+#' 
+#' We now use the "describe()" function from the "psych" package to create a table of important statistics. 
+#' "describe()" produces the mean, median, standard deviation, min, max, range skew, kurtosis and standard error
+#' with considerably less wrangling than using "summary". "describe()" does not produce the quantile values, 
+#' but I have included the quantiles on the boxplots below, where they are more interesting:
+#' 
+
+
+vino_1 <- vino[,-1] # Removing the column Category.
+vino_sum_stats <- vino_1 %>% describe() %>% round(digits = 3)
+vino_sum_stats[ , 1:2] <- list(NULL)  # Columns 1 and 2 are not important here.
+vino_sum_stats
+
+
+vino_sum_stats %>% kable(caption = "Wine Sample Stats") %>%
+  kable_styling(latex_options = "scale_down",  
+    full_width = F, position = "left")
+
+
+#' 
+#' 
+#' Now we will look more closely at each variable's distribution, including whether the distribution is normal,
+#' both by inspecting the histogram and considering the Shapiro-Wilk test. The objective here is to consider the 
+#' normality of the variable in relation to the other variables, not in absolute terms.The boxplots are of particular interest,
+#' since they show how each variable's Categories interact, e.g., do the plots overlap a little, a lot, or not at all. Also note the outliers.\
+#' 
+#' 
+#' #### **Alcohol**
+#' 
+#' 
+#' Find the means of Alcohol content for each of Categories 1, 2, and 3:
+#' 
+#' 
+## ----Alc means, echo=TRUE------------------------------------------------------------------------
+
+vino_1 <- vino %>% filter(Category == 1) %>% select(Alcohol) %>% colMeans() 
+vino_2 <- vino %>% filter(Category == 2) %>% select(Alcohol) %>% colMeans()
+vino_3 <- vino %>% filter(Category == 3) %>% select(Alcohol) %>% colMeans()
+
+#' \
+#' Combine these means into a table:
+#' 
+## ----alc table-----------------------------------------------------------------------------------
+
+vino_alcohol <- tibble(`Average Alcohol Content` = "Category 1", "Percent" = vino_1)
+
+
+vino_alcohol <- rbind(vino_alcohol, tibble(`Average Alcohol Content`= "Category 2",
+                                                 "Percent" = vino_2))
+
+vino_alcohol <- rbind(vino_alcohol, tibble(`Average Alcohol Content`= "Category 3",
+                                               "Percent" = vino_3))
+
+
+#' 
+#' Table of Average Alcohol Content by Category. Categories 1 and 3 have higher content than category 2. 
+#' This difference is readily apparent in the boxplot.\
+#' 
+#' 
+## ----Alc content---------------------------------------------------------------------------------
+
+
+vino_alcohol %>% kbl() %>% kable_styling(latex_options = c("striped", "HOLD_position"),  
+full_width = F, position = "center")
+
+#' 
+#' 
+#' Histogram of Alcohol content Category. It appears to somewhat normally distributed. We will use histograms and the 
+#' Shapiro-Wilk Normality Test throughout to compare how close to normally distributed the data is for each variable, and 
+#' how it compares to the others:
+#' 
+## ----Alc hist, message=FALSE---------------------------------------------------------------------
+
+
+vino %>% ggplot(aes(Alcohol)) + geom_histogram(bins = 13, color = "black", fill = "dark red") +  
+  scale_x_continuous(breaks = c(seq(10, 20, 0.5))) + xlab("% Alcohol") + 
+  scale_y_continuous(breaks = c(seq(0, 30, 5))) +ylab("Number of Wines") +
+  ggtitle("Distribution of Alcohol Content by Number of Wines")
+
+
+#' 
+#' 
+#' 
+## ----vin alc-------------------------------------------------------------------------------------
+shapiro.test(vino$Alcohol)
+
+
+#' 
+#' 
+#' Boxplot of Alcohol by Category. I have included the quantiles. Means are in white numbers. Note the outliers in Category 2:\
+#' 
+#' 
+## ----alc box-------------------------------------------------------------------------------------
+
+
+vino %>% select(Category, Alcohol) %>% mutate(Category = factor(Category)) %>% 
+  ggplot(aes(x = Category, y = Alcohol, group = Category, fill = Category)) + 
+  geom_boxplot(outlier.colour = "red")  +  ggtitle("Alcohol Content") + ylab("Alcohol %") + 
+  stat_summary(fun = "mean", geom = "text", size = 3, color = "white",
+  aes(label = round(after_stat(y), 2)), hjust = 1) +   stat_summary(geom = "text", fun = "quantile", 
+  aes(label = round(after_stat(y), 2), y = vino$Alcohol), size = 3, hjust = -.5, vjust = -.5) 
+
+#' 
+#' 
+#' #### **Malic Acid**
+#' 
+#' 
+#' 
+## ----malic---------------------------------------------------------------------------------------
+
+vino_1 <- vino %>% filter(Category == 1) %>% select(`Malic_acid`) %>% colMeans()
+vino_2 <- vino %>% filter(Category == 2) %>% select(`Malic_acid`) %>% colMeans()
+vino_3 <- vino %>% filter(Category == 3) %>% select(`Malic_acid`) %>% colMeans()
+
+vino_malic <- tibble("Malic acid" = "Category 1", "g/l" = vino_1)
+
+
+vino_malic <- bind_rows(vino_malic, tibble("Malic acid" = "Category 2",
+                                               "g/l" = vino_2))
+
+vino_malic <- bind_rows(vino_malic, tibble("Malic acid" = "Category 3",
+                                               "g/l" = vino_3))
+
+#' 
+#' Table of Average Malic Acid Content by Category. Category 3 is nearly 50% higher in Malic Acid than the other two categories:
+#' 
+## ----malic table---------------------------------------------------------------------------------
+
+vino_malic %>% kbl() %>% kable_styling(latex_options = c("striped", "HOLD_position"),  
+full_width = F, position = "center")
+
+#' 
+#' 
+#' Histogram is the plot of Malic Acid by Category showing positive skew.
+#' 
+#' 
+## ----Malic hist----------------------------------------------------------------------------------
+
+knitr::opts_chunk$set(tidy.opts = list(width.cutoff = 60), tidy = TRUE)
+
+ggplot(data = vino, aes(`Malic_acid`)) + geom_histogram(bins = 13, color = "black", 
+  fill = "dark red") + ggtitle("Distribution of Malic Acid by Category") + 
+  labs(x = "Malic Acid (g/l)", y = "Number of Wines") +
+  scale_x_continuous(breaks = c(seq(0, 6, 0.5)))  
+
+
+
+#' 
+## ----malic shapiro-------------------------------------------------------------------------------
+
+shapiro.test(vino$Malic_acid)
+
+#' 
+#' 
+#' Boxplot of Malic Acid by Category. I have included the quantiles. This time the means are in dark red numbers. 
+#' White was difficult to see. As mentioned, Category 3 is much higher:\
+#' 
+## ----Malic box-----------------------------------------------------------------------------------
+
+vino %>% select(Category, "Malic_acid") %>% mutate(Category = factor(Category)) %>% 
+  ggplot(aes(x = Category, y = Malic_acid, group = Category, fill = Category)) + 
+  geom_boxplot(outlier.colour = "red")  +  ggtitle("Malic Acid Content by Category") + ylab("Malic Acid g/l") +                                                   
+  stat_summary(fun = "mean", geom = "text", size = 3, color = "dark red",
+               aes(label = round(after_stat(y), 2)), hjust = 1) +
+  stat_summary(geom = "text", fun = "quantile", 
+               aes(label = round(after_stat(y),2)), size = 3, hjust = -.1, vjust = -.1) 
+
+
+#' 
+#' 
+#' #### **Ash**
+#' 
+#' 
+## ----ash-----------------------------------------------------------------------------------------
+
+vino_1 <- vino %>% filter(Category == 1) %>% select(Ash) %>% colMeans()
+vino_2 <- vino %>% filter(Category == 2) %>% select(Ash) %>% colMeans()
+vino_3 <- vino %>% filter(Category == 3) %>% select(Ash) %>% colMeans()
+
+vino_ash <- tibble(Ash = "Average Ash Content Category 1", "Value" = vino_1)
+
+
+vino_ash <- rbind(vino_ash, tibble(Ash = "Average Ash Content Category 2",
+                                           "Value" = vino_2))
+
+vino_ash <- rbind(vino_ash, tibble(Ash = "Average Ash Content Category 3",
+                                           "Value" = vino_3))
+
+
+#' 
+#' 
+#' Table of Ash by Category:
+#' 
+## ----ash table-----------------------------------------------------------------------------------
+
+vino_ash %>% kbl() %>% kable_styling(latex_options = c("striped", "HOLD_position"),  
+full_width = F, position = "center")
+
+#' 
+#' 
+#' Ash content by Category. It appears to be somewhat normally distributed. Not much variance among categories:
+#' 
+## ----ash hist------------------------------------------------------------------------------------
+
+vino %>% ggplot(aes(Ash)) + geom_histogram(bins = 20, color = "black", fill = "dark red") +  
+  scale_x_continuous(breaks = c(seq(1, 5, 0.5))) + xlab("Ash (g/l)") + scale_y_continuous(breaks = c(seq(0, 20, 1))) + 
+  ylab("Number of Wines") + ggtitle("Distribution of Ash by Category") 
+
+
+#' 
+## ----ash shapiro---------------------------------------------------------------------------------
+
+shapiro.test(vino$Ash)
+
+#' 
+#' 
+#' Boxplot of Ash content by Category. Means are white numbers. Categories all overlap:
+#' 
+## ----Ash box-------------------------------------------------------------------------------------
+
+vino %>% select(Category, Ash) %>% mutate(Category = factor(Category)) %>% 
+  ggplot(aes(x = Category, y = Ash, group = Category, fill = Category)) + 
+  geom_boxplot(outlier.colour = "red")  +  ggtitle("Ash Content by Category") + ylab("Ash (g/l") +                                                   
+  stat_summary(fun = "mean", geom = "text", size = 3, color = "white", 
+               aes(label = round(after_stat(y), 2)), hjust = 1) +
+  stat_summary(geom = "text", fun = "quantile", 
+               aes(label = round(after_stat(y), 2), y = vino$Ash), size = 3, hjust = -.5, vjust = -.5)
+
+#' 
+#' 
+#' #### **Alcalinity of Ash**
+#' 
+#' 
+## ----Alc Ash-------------------------------------------------------------------------------------
+
+vino_1 <- vino %>% filter(Category == 1) %>% select(Alcalinity_of_ash) %>% colMeans()
+vino_2 <- vino %>% filter(Category == 2) %>% select(Alcalinity_of_ash) %>% colMeans()
+vino_3 <- vino %>% filter(Category == 3) %>% select(Alcalinity_of_ash) %>% colMeans()
+
+vino_alcaline <- tibble(Alcalinity_of_Ash = 
+                          "Average Alcalinity of Ash Content Category 1", "Value" = vino_1)
+
+
+vino_alcaline <- rbind(vino_alcaline, tibble(Alcalinity_of_Ash = 
+                              "Average Alcalinity of Ash Content Category 2",
+                                   "Value" = vino_2))
+
+vino_alcaline <- rbind(vino_alcaline, tibble(Alcalinity_of_Ash = 
+                              "Average Alcalinity of Ash Content Category 3",
+                                   "Value" = vino_3))
+
+
+#' 
+#' 
+#' Table of Alcalinity of Ash by Category:
+#' 
+## ----alc ash table-------------------------------------------------------------------------------
+
+vino_alcaline %>% kbl() %>% kable_styling(latex_options = c("striped", "HOLD_position"),  
+full_width = F, position = "center")
+
+
+#' 
+#' 
+#' Histogram of Alcalinity of Ash. It appears to be relatively normally distributed. Category 1 has the least:
+#' 
+#' 
+## ----ALC Ash hist--------------------------------------------------------------------------------
+
+vino %>% ggplot(aes(Alcalinity_of_ash)) + geom_histogram(bins = 20, color = "black", fill = "dark red") +  
+  scale_x_continuous(breaks = c(seq(10, 30, 1))) + xlab("Alcalinity of ash (meq/l)") + 
+  scale_y_continuous(breaks = c(seq(0, 25, 5))) + ylab("Number of Wines") +
+  ggtitle("Distribution of Alcalinity of Ash by Category")
+
+
+#' 
+## ----alc of ash shapiro--------------------------------------------------------------------------
+
+shapiro.test(vino$`Alcalinity_of_ash`)
+
+
+#' Boxplot of Alcalinity of Ash content by Category:\
+#' 
+## ----alc ash box---------------------------------------------------------------------------------
+vino %>% select(Category, `Alcalinity_of_ash`) %>% mutate(Category = factor(Category)) %>% 
+  ggplot(aes(x = Category, y = `Alcalinity_of_ash`, group = Category, fill = Category)) + 
+  geom_boxplot(outlier.colour = "red")  +  ggtitle("Alcalinity Of Ash Content by Category") + ylab("Alcalinity of Ash (meq/l)") +                                     stat_summary(fun = "mean", geom = "text", size = 3, color = "white", aes(label = round(after_stat(y), 2)), hjust = 1) +
+  stat_summary(geom = "text", fun = "quantile", aes(label = round(after_stat(y), 2), 
+            y = vino$`Alcalinity_of_ash`), size = 3, hjust = -.5, vjust = -.5)
+
+
+
+
+
+#' 
+#' 
+#' #### **Magnesium**
+#' 
+#' \
+#' 
+## ----Mag Table-----------------------------------------------------------------------------------
+
+vino_1 <- vino %>% filter(Category == 1) %>% select(Magnesium) %>% colMeans()
+vino_2 <- vino %>% filter(Category == 2) %>% select(Magnesium) %>% colMeans()
+vino_3 <- vino %>% filter(Category == 3) %>% select(Magnesium) %>% colMeans()
+
+vino_mag <- tibble(Magnesium = "Average Magnesium Content Category 1", "Value" = vino_1)
+
+
+vino_mag <- rbind(vino_mag, tibble(Magnesium = "Average Magnesium Content Category 2",
+                                             "Value" = vino_2))
+
+vino_mag <- rbind(vino_mag, tibble(Magnesium  = "Average Magnesium Content Category 3",
+                                             "Value" = vino_3))
+
+
+#'
+#' Table of Magnesium content by Category:
+#' 
+## ----Mag table-----------------------------------------------------------------------------------
+
+vino_mag %>% kbl() %>% kable_styling(latex_options = c("striped", "HOLD_position"),  
+full_width = F, position = "center")
+
+
+#' 
+#' Here is the histogram of Magnesium showing positive skew from Category 1.The Shapiro-Wilk test seems to confirm:
+#' 
+#' 
+## ----Mag hist------------------------------------------------------------------------------------
+
+vino %>% ggplot(aes(Magnesium)) + geom_histogram(bins = 20, color = "black", fill = "dark red") +  
+  scale_x_continuous(breaks = c(seq(60, 175, 5))) + xlab("Magnesium (mg/l)") + 
+  scale_y_continuous(breaks = c(seq(0, 25, 5))) + ylab("Number of Wines") +
+  ggtitle("Distribution of Magnesium by Category")
+
+
+
+#' 
+## ------------------------------------------------------------------------------------------------
+
+shapiro.test(vino$Magnesium)
+
+#' 
+#' 
+#' Boxplot of Magnesium content by Category:
+#' 
+## ----Mag box-------------------------------------------------------------------------------------
+
+vino %>% select(Category, Magnesium) %>% mutate(Category = factor(Category)) %>% 
+  ggplot(aes(x = Category, y = Magnesium, group = Category, fill = Category)) + 
+  geom_boxplot(outlier.colour = "red")  +  ggtitle("Magnesium Content by Category") + ylab("Magnesium (mg/l)") +                                                   
+  stat_summary(fun = "mean", geom = "text", size = 3, color = "white", 
+               aes(label = round(after_stat(y), 2)), hjust = 1) +
+  stat_summary(geom = "text", fun = "quantile", 
+               aes(label = round(after_stat(y), 2), y = vino$Magnesium), size = 3, hjust = -.5, vjust = -.5)
+
+#'
+#' 
+#' #### **Total Phenols**
+#' 
+#' \
+#' 
+## ----tot phens-----------------------------------------------------------------------------------
+
+vino_1 <- vino %>% filter(Category == 1) %>% select(Total_phenols) %>% colMeans()
+vino_2 <- vino %>% filter(Category == 2) %>% select(Total_phenols) %>% colMeans()
+vino_3 <- vino %>% filter(Category == 3) %>% select(Total_phenols) %>% colMeans()
+
+vino_tot <- tibble(Total_phenols = "Average Total Phenols Content Category 1", "Value" = vino_1)
+
+
+vino_tot <- rbind(vino_tot, tibble(Total_phenols = "Average Total Phenols Content Category 2",
+                                   "Value" = vino_2))
+
+vino_tot <- rbind(vino_tot, tibble(Total_phenols  = "Average Total Phenols Content Category 3",
+                                   "Value" = vino_3))
+
+#' 
+#' 
+#' Table of Total Phenols by Category:
+#' 
+#' 
+## ----tot phen table------------------------------------------------------------------------------
+
+vino_tot %>% kbl() %>% kable_styling(latex_options = c("striped", "HOLD_position"),  
+full_width = F, position = "center")
+
+
+#' 
+#' Total phenols show bi-modality. Shapiro-Wilk shows it is in the range of normality of some of the other parameters:
+#' 
+#' 
+## ----tot phen hist-------------------------------------------------------------------------------
+
+vino %>% ggplot(aes(Total_phenols)) + geom_histogram(bins = 20, color = "black", fill = "dark red") +  
+  scale_x_continuous(breaks = c(seq(.75, 4, .25))) + xlab("Total Phenols g/l)") + 
+  scale_y_continuous(breaks = c(seq(0, 25, 5))) + ylab("Number of Wines") +
+  ggtitle("Distribution of Total Phenols by Category")
+
+
+
+#' 
+
+#' To investigate the apparent bi-modal distribution, here are histograms of each Category. Category 1 shows negative skew, 
+#' Category 2 positive skew, and Category 2 appears to be--relatively--normally distributed. This verifies the trend--
+#' Total Phenols should be an effective differentiator.
+#' 
+#' 
+## ----tot phenol facet----------------------------------------------------------------------------
+
+vino %>% ggplot(aes(Total_phenols)) + geom_histogram(bins = 20, color = "black", fill = "dark red") +  
+  scale_x_continuous(breaks = c(seq(.75, 4, .5))) + xlab("Total Phenols g/l)") +
+  scale_y_continuous(breaks = c(seq(0, 25, 5))) + ylab("Number of Wines") +
+  ggtitle("Distribution of Total Phenols by Category") + facet_wrap(~Category)
+
+
+#' 
+## ----tot phenols shapiro-------------------------------------------------------------------------
+
+shapiro.test(vino$Total_phenols)
+
+#' 
+#' 
+#' Boxplot of Total Phenols content by Category. Good differentiation among Categories:
+#' 
+#' 
+## ----tot phen box--------------------------------------------------------------------------------
+
+vino %>% select(Category, Total_phenols) %>% mutate(Category = factor(Category)) %>% 
+  ggplot(aes(x = Category, y = Total_phenols, group = Category, fill = Category)) + 
+  geom_boxplot(outlier.colour = "red")  +  ggtitle("Total Phenols Content by Category") + ylab("Total Phenols (g/l)") +                                                   
+  stat_summary(fun = "mean", geom = "text", size = 3, color = "white", 
+               aes(label = round(after_stat(y), 2)), hjust = 1) +
+  stat_summary(geom = "text", fun = "quantile", 
+               aes(label = round(after_stat(y), 2), y = vino$Total_phenols), size = 3, hjust = -.5, vjust = -.5)
+
+
+#' 
+#' 
+#' #### **Flavanoids**
+#' 
+#' 
+#' 
+## ----Flav----------------------------------------------------------------------------------------
+
+vino_1 <- vino %>% filter(Category == 1) %>% select(Flavanoids) %>% colMeans()
+vino_2 <- vino %>% filter(Category == 2) %>% select(Flavanoids) %>% colMeans()
+vino_3 <- vino %>% filter(Category == 3) %>% select(Flavanoids) %>% colMeans()
+
+vino_flav <- tibble(Flavanoids = "Average Flavanoids Content Category 1", "Value" = vino_1)
+
+
+vino_flav <- rbind(vino_flav, tibble(Flavanoids = "Average Flavanoids Content Category 2",
+                                   "Value" = vino_2))
+
+vino_flav <- rbind(vino_flav, tibble(Flavanoids = "Average Flavanoids Content Category 3",
+                                   "Value" = vino_3))
+
+#' 
+#'
+#' Table of Flavanoids by Category:
+#' 
+#' 
+## ----Flav table----------------------------------------------------------------------------------
+
+vino_flav %>% kbl() %>% kable_styling(latex_options = c("striped", "HOLD_position"),  
+full_width = F, position = "center")
+
+#' 
+#' 
+#' Here is the histogram of Flavanoids. It does not appear to be normal, showing both bi-modality and positive skew. 
+#' The Shapiro-Wilk test seems to confirm:
+#' 
+#' 
+## ----Flav hist-----------------------------------------------------------------------------------
+
+vino %>% ggplot(aes(Flavanoids)) + geom_histogram(bins = 20, color = "black", fill = "dark red") +  
+  scale_x_continuous(breaks = c(seq(.25, 5.25, .25))) + xlab("Flavanoids") + scale_y_continuous(breaks = c(seq(0, 25, 5))) + 
+  ylab("Number of Wines") +
+  ggtitle("Distribution of Flavanoids by Category") 
+
+
+#' 
+## ------------------------------------------------------------------------------------------------
+
+shapiro.test(vino$Flavanoids)
+
+#' 
+#' The histograms for each each Category are below. Category 1 is concentrated in a narrow range with slight negative skew, 
+#' Category 2 is relatively normal, and Category 3 is concentrated in a narrow range, and positively skewed. This verifies the 
+#' trend and Flavanoids should be an effective differentiator.
+#' 
+## ----flav hist facet, warning=FALSE--------------------------------------------------------------
+
+vino %>% ggplot(aes(Flavanoids)) + geom_histogram(bins = 20, color = "black", fill = "dark red") + 
+  scale_x_continuous(breaks = c(seq(.25, 5.25, .5))) + xlab("Flavanoids") + scale_y_continuous(breaks = c(seq(0, 25, 5))) +
+  ylab("Number of Wines") +
+  ggtitle("Distribution of Flavanoids by Category") + facet_wrap(~ Category)
+
+
+#' 
+#' 
+#' Boxplot of Flavanoids content by Category. Wide differentiation among Categories:
+#' 
+## ----Flav box------------------------------------------------------------------------------------
+
+vino %>% select(Category, Flavanoids) %>% mutate(Category = factor(Category)) %>% 
+  ggplot(aes(x = Category, y = Flavanoids, group = Category, fill = Category)) + 
+  geom_boxplot(outlier.colour = "red")  +  ggtitle("Flavanoids Content by Category") + ylab("Flavanoids") +                                                   
+  stat_summary(fun = "mean", geom = "text", size = 3, color = "white", 
+               aes(label = round(after_stat(y), 2)), hjust = 1) +
+  stat_summary(geom = "text", fun = "quantile", 
+               aes(label = round(after_stat(y), 2), y = vino$Flavanoids), size = 3, hjust = -.5, vjust = -.5)
+
+#' 
+#' 
+#' #### **Nonflavanoid Phenols**
+#' 
+#' 
+#' 
+## ----Nonflav phen--------------------------------------------------------------------------------
+
+vino_1 <- vino %>% filter(Category == 1) %>% select(Nonflavanoid_phenols) %>% colMeans()
+vino_2 <- vino %>% filter(Category == 2) %>% select(Nonflavanoid_phenols) %>% colMeans()
+vino_3 <- vino %>% filter(Category == 3) %>% select(Nonflavanoid_phenols) %>% colMeans()
+
+vino_nonflav <- tibble(Nonflavanoid_phenols = "Average Nonflavanoid Phenols Content Category 1",
+                       "Value" = vino_1)
+
+
+vino_nonflav <- rbind(vino_nonflav, tibble(Nonflavanoid_phenols = "Average Nonflavanoid Phenols Content Category 2",
+                                     "Value" = vino_2))
+
+vino_nonflav <- rbind(vino_nonflav, tibble(Nonflavanoid_phenols = "Average Nonflavanoid Phenols Content Category 3",
+                                     "Value" = vino_3))
+
+#' 
+#' 
+#' Table of Nonflavanoid Phenols by Category:
+#' 
+#' 
+## ----nonflav table-------------------------------------------------------------------------------
+
+vino_nonflav %>% kbl() %>% kable_styling(latex_options = c("striped", "HOLD_position"),  
+full_width = F, position = "center")
+
+#' 
+#' 
+#' Histogram of Non-flavanoid Phenols. Shows some negative skew:
+#' 
+#' 
+## ----nonflav phen hist---------------------------------------------------------------------------
+
+vino %>% ggplot(aes(Nonflavanoid_phenols)) + geom_histogram(bins = 20, color = "black", fill = "dark red") +  
+  scale_x_continuous(breaks = c(seq(0, 1, .1))) + xlab("Nonflavanoid phenols") + scale_y_continuous(breaks = c(seq(0, 25, 5))) + 
+  ylab("Numer of Wines") +
+  ggtitle("Distribution of Flavanoids by Category")
+
+
+
+#' 
+## ------------------------------------------------------------------------------------------------
+
+shapiro.test(vino$Nonflavanoid_phenols)
+
+#' 
+#' 
+#' Boxplot of Nonflavanoid Phenols content by Category. Overlap between Category 1 and 2, and 2 and 3. 
+#' No overlap between 1 and 3:
+#' 
+## ----nonflav box---------------------------------------------------------------------------------
+
+vino %>% select(Category, Nonflavanoid_phenols) %>% mutate(Category = factor(Category)) %>% 
+  ggplot(aes(x = Category, y = Nonflavanoid_phenols, group = Category, fill = Category)) + 
+  geom_boxplot(outlier.colour = "red")  +  ggtitle("Nonflavanoid Phenols Content by Category") + ylab("Nonflavanoid phenols") +                                                   
+  stat_summary(fun = "mean", geom = "text", size = 3, color = "white", 
+               aes(label = round(after_stat(y), 2)), hjust = 1) +
+  stat_summary(geom = "text", fun = "quantile", 
+               aes(label = round(after_stat(y), 2), y = vino$Nonflavanoid_phenols), size = 3, hjust = -.5, vjust = -.5)
+
+
+#' 
+#' 
+#' #### **Proanthocyanins**
+#' 
+#' Find the means for each Category:
+#' 
+#' 
+## ----proanth-------------------------------------------------------------------------------------
+
+vino_1 <- vino %>% filter(Category == 1) %>% select(Proanthocyanins) %>% colMeans()
+vino_2 <- vino %>% filter(Category == 2) %>% select(Proanthocyanins) %>% colMeans()
+vino_3 <- vino %>% filter(Category == 3) %>% select(Proanthocyanins) %>% colMeans()
+
+vino_proan <- tibble(Proanthocyanins = "Average Proanthocyanins Content Category 1",
+                     "Value" = vino_1)
+
+
+vino_proan <- rbind(vino_proan, tibble(Proanthocyanins = "Average Proanthocyanins Content Category 2",
+                                           "Value" = vino_2))
+
+vino_proan <- rbind(vino_proan, tibble(Proanthocyanins = "Average Proanthocyanins Content Category 3",
+                                           "Value" = vino_3))
+
+#' 
+#' 
+#' Table of Proanthocyanins by Category:
+#' 
+#' 
+## ----proanth table-------------------------------------------------------------------------------
+
+vino_proan %>% kbl() %>% kable_styling(latex_options = c("striped", "HOLD_position"),  
+full_width = F, position = "center")
+
+#' 
+#' 
+#' Histogram of Proanthocyanins. Appears to have some positive skew:
+#' 
+#' 
+## ----proanth hist--------------------------------------------------------------------------------
+
+vino %>% ggplot(aes(Proanthocyanins)) + geom_histogram(bins = 20, color = "black", fill = "dark red") +  
+  scale_x_continuous(breaks = c(seq(0.25, 3.75, 0.25))) + xlab("Proanthocyanins") + scale_y_continuous(breaks = c(seq(0, 25, 5))) + 
+  ylab("Number Wines") +   ggtitle("Distribution of Proanthocyanins by Category")
+
+
+#' 
+## ------------------------------------------------------------------------------------------------
+
+shapiro.test(vino$Proanthocyanins)
+
+#' 
+#' 
+#' Boxplot of Proanthocyanins content by Category. No overlap between 1 and 3, little overlap between 2 and 3:
+#' 
+#' 
+## ----proanth box---------------------------------------------------------------------------------
+
+vino %>% select(Category, Proanthocyanins) %>% mutate(Category = factor(Category)) %>% 
+  ggplot(aes(x = Category, y = Proanthocyanins, group = Category, fill = Category)) + 
+  geom_boxplot(outlier.colour = "red")  +  ggtitle("Proanthocyanins Content by Category") + ylab("Proanthocyanins (mg/l)") +                                                   
+  stat_summary(fun = "mean", geom = "text", size = 3, color = "white", 
+               aes(label = round(after_stat(y), 2)), hjust = 1) +
+  stat_summary(geom = "text", fun = "quantile", 
+               aes(label = round(after_stat(y), 2), y = vino$Proanthocyanins), size = 3, hjust = -.5, vjust = -.5)
+
+#' 
+#' 
+#' #### **Color Intensity**
+#' 
+#' 
+#' 
+#' Category means:
+#' 
+## ----color intensity-----------------------------------------------------------------------------
+
+vino_1 <- vino %>% filter(Category == 1) %>% select(Color_intensity) %>% colMeans()
+vino_2 <- vino %>% filter(Category == 2) %>% select(Color_intensity) %>% colMeans()
+vino_3 <- vino %>% filter(Category == 3) %>% select(Color_intensity) %>% colMeans()
+
+vino_color <- tibble(Color_intensity = "Average Color Intensity Category 1", "Value" = vino_1)
+
+vino_color <- rbind(vino_color, tibble(Color_intensity = "Average Color Intensity Category 2",
+                                       "Value" = vino_2))
+
+vino_color <- rbind(vino_color, tibble(Color_intensity = "Average Color Intensity Category 3",
+                                       "Value" = vino_3))
+
+#' 
+#' 
+#' Table of Color Intensity by Category:
+#' 
+#' 
+## ----color table---------------------------------------------------------------------------------
+
+vino_color %>% kbl() %>% kable_styling(latex_options = c("striped", "HOLD_position"),  
+full_width = F, position = "center")
+
+
+#' 
+#' 
+#' Histogram of Color Intensity showing positive skew:
+#' 
+#' 
+## ----color hist----------------------------------------------------------------------------------
+
+vino %>% ggplot(aes(Color_intensity)) + geom_histogram(bins = 20, color = "black", fill = "dark red") +  
+  scale_x_continuous(breaks = c(seq(1, 15, 1))) + xlab("Color intensity") + scale_y_continuous(breaks = c(seq(0, 25, 5))) + ylab("Number of Wines") +
+  ggtitle("Distribution of Color intensity by Category") 
+
+
+#' 
+## ------------------------------------------------------------------------------------------------
+
+shapiro.test(vino$Color_intensity)
+
+#' 
+#' 
+#' Boxplot of Color Intensity by Category. Good divergence among the categories, especially Category 2:
+#' 
+#' 
+## ----color box-----------------------------------------------------------------------------------
+
+vino %>% select(Category, Color_intensity) %>% mutate(Category = factor(Category)) %>% 
+  ggplot(aes(x = Category, y = Color_intensity, group = Category, fill = Category)) + 
+  geom_boxplot(outlier.colour = "red")  +  ggtitle("Color intensity by Category") + ylab("Color intensity") +                                                   
+  stat_summary(fun = "mean", geom = "text", size = 3, color = "white", 
+               aes(label = round(after_stat(y), 2)), hjust = 1) +
+  stat_summary(geom = "text", fun = "quantile", 
+               aes(label = round(after_stat(y), 2), y = vino$Color_intensity), size = 3, hjust = -.5, vjust = -.5)
+
+#' 
+#' 
+#' #### **Hue**
+#' 
+#' 
+#' 
+## ----hue means-----------------------------------------------------------------------------------
+
+vino_1 <- vino %>% filter(Category == 1) %>% select(Hue) %>% colMeans()
+vino_2 <- vino %>% filter(Category == 2) %>% select(Hue) %>% colMeans()
+vino_3 <- vino %>% filter(Category == 3) %>% select(Hue) %>% colMeans()
+
+vino_hue <- tibble(Hue = "Average Hue Category 1", "Value" = vino_1)
+
+
+vino_hue <- rbind(vino_hue, tibble(Hue = "Average Hue Category 2",
+                                       "Value" = vino_2))
+
+vino_hue <- rbind(vino_hue, tibble(Hue = "Average Hue Category 3",
+                                       "Value" = vino_3))
+
+#' 
+#' 
+#' Table of Hue by Category:
+#' 
+#' 
+## ----hue table-----------------------------------------------------------------------------------
+
+vino_hue %>% kbl() %>% kable_styling(latex_options = c("striped", "HOLD_position"),  
+full_width = F, position = "center")
+
+
+#' 
+#' 
+#' Histogram of Hue:
+#' 
+#' 
+## ----hue hist------------------------------------------------------------------------------------
+
+vino %>% ggplot(aes(Hue)) + geom_histogram(bins = 20, color = "black", fill = "dark red") +  
+  scale_x_continuous(breaks = c(seq(0.25, 3.75, 0.25))) + xlab("Hue") + scale_y_continuous(breaks = c(seq(0, 25, 5))) + 
+  ylab("Number Wines") +   ggtitle("Distribution of Hue by Category") 
+
+
+#' 
+## ----hue shapiro---------------------------------------------------------------------------------
+
+shapiro.test(vino$Hue)
+
+#' 
+#' 
+#' Boxplot of Hue by Category. Categories 1 and 2 are close, while Category 3 shows no overlap with 1 and 2:
+#' 
+#' 
+## ----hue box-------------------------------------------------------------------------------------
+
+vino %>% select(Category, Hue) %>% mutate(Category = factor(Category)) %>% 
+  ggplot(aes(x = Category, y = Hue, group = Category, fill = Category)) + 
+  geom_boxplot(outlier.colour = "red")  +  ggtitle("Hue by Category") + ylab("Hue") +                                                   
+  stat_summary(fun = "mean", geom = "text", size = 3, color = "white", 
+               aes(label = round(after_stat(y), 2)), hjust = 1) +
+  stat_summary(geom = "text", fun = "quantile", 
+               aes(label = round(after_stat(y), 2), y = vino$Hue), size = 3, hjust = -.5, vjust = -.5)
+
+#' 
+#' 
+#' #### **OD280**
+#' 
+#' 
+#' Category means:
+#' 
+## ----OD280---------------------------------------------------------------------------------------
+
+vino_1 <- vino %>% filter(Category == 1) %>% select(OD280) %>% colMeans()
+vino_2 <- vino %>% filter(Category == 2) %>% select(OD280) %>% colMeans()
+vino_3 <- vino %>% filter(Category == 3) %>% select(OD280) %>% colMeans()
+
+vino_od280 <- tibble(OD280_OD315_of_diluted_wines = "Average OD280 Category 1",
+                     "Value" = vino_1)
+
+vino_od280 <- rbind(vino_od280, tibble(OD280_OD315_of_diluted_wines = "Average OD280 Category 2",
+                                   "Value" = vino_2))
+
+vino_od280 <- rbind(vino_od280, tibble(OD280_OD315_of_diluted_wines = "Average OD280 Category 3",
+                                       "Value" = vino_3))
+
+#' 
+#' 
+#' Table of OD280 by Category:
+#' 
+#' 
+## ----OD280 table---------------------------------------------------------------------------------
+
+vino_od280 %>% kbl() %>% kable_styling(latex_options = c("striped", "HOLD_position"),  
+full_width = F, position = "center")
+
+
+#' 
+#' 
+#' Histogram of OD280 shows a bi-modal distribution:
+#' 
+#' 
+## ----OD280 hist----------------------------------------------------------------------------------
+
+vino %>% ggplot(aes(OD280)) + geom_histogram(bins = 20, color = "black", fill = "dark red") +  
+  scale_x_continuous(breaks = c(seq(0, 5, .5))) + xlab("OD280") + scale_y_continuous(breaks = c(seq(0, 25, 5))) + 
+  ylab("Number of Wines") +
+  ggtitle("Distribution of OD280 by Category")
+  
+
+
+#' 
+## ----OD280 shapiro-------------------------------------------------------------------------------
+
+shapiro.test(vino$OD280)
+
+#' 
+#' Inspecting the histograms for each separate Category shows Category 1 is slightly negatively skewed, Category 2 is 
+#' relatively normal, and Category 3 is in a narrow range and positively skewed. This verifies the trend. 
+#' OD280 should be an effective differentiator:
+#' 
+## ----OD280 hist facet----------------------------------------------------------------------------
+
+vino %>% ggplot(aes(OD280)) + geom_histogram(bins = 20, color = "black", fill = "dark red") +  
+  scale_x_continuous(breaks = c(seq(0, 5, .5))) + xlab("OD280") + scale_y_continuous(breaks = c(seq(0, 25, 5))) + 
+  ylab("Number of Wines") +
+  ggtitle("Distribution of OD280 by Category") +facet_wrap(~ Category)
+
+
+#' 
+#' Boxplot of OD280 by Category. No overlap between Category 3 and Categories 1 and 2:
+#' 
+#' 
+## ----OD280 box-----------------------------------------------------------------------------------
+
+vino %>% select(Category, OD280) %>% mutate(Category = factor(Category)) %>% 
+  ggplot(aes(x = Category, y = OD280, group = Category, fill = Category)) + 
+  geom_boxplot(outlier.colour = "red")  +  ggtitle("OD280 by Category") + ylab("OD280") + 
+  stat_summary(fun = "mean", geom = "text", size = 3, color = "white", 
+               aes(label = round(after_stat(y), 2)), hjust = 1) + stat_summary(geom = "text", fun = "quantile", 
+               aes(label = round(after_stat(y), 2), y = vino$OD280), size = 3, hjust = -.5, vjust = -.5)
+
+
+#' 
+#' #### **Proline**
+#' 
+#' 
+#' 
+## ----proline-------------------------------------------------------------------------------------
+
+vino_1 <- vino %>% filter(Category == 1) %>% select(Proline) %>% colMeans()
+vino_2 <- vino %>% filter(Category == 2) %>% select(Proline) %>% colMeans()
+vino_3 <- vino %>% filter(Category == 3) %>% select(Proline) %>% colMeans()
+
+vino_pro <- tibble(Proline = "Average Proline Category 1", "Value" = vino_1)
+
+
+vino_pro <- rbind(vino_pro, tibble(Proline = "Average Proline Category 2",
+                                   "Value" = vino_2))
+
+vino_pro <- rbind(vino_pro, tibble(Proline = "Average Proline Category 3",
+                                   "Value" = vino_3))
+
+
+#' 
+#' 
+#' Table of Proline by Category:
+#' 
+#' 
+## ----proline table-------------------------------------------------------------------------------
+
+vino_pro %>% kbl() %>% kable_styling(latex_options = c("striped", "HOLD_position"),  
+full_width = F, position = "center")
+
+
+#' 
+#' 
+#' Histogram of Proline content showing positive skew. The Shapiro-Wilk test seems to confirm:
+#' 
+#' 
+## ----proline hist--------------------------------------------------------------------------------
+
+vino %>% ggplot(aes(Proline)) + geom_histogram(bins = 20, color = "black", fill = "dark red") +  
+  scale_x_continuous(breaks = c(seq(0.25, 3.75, 0.25))) + xlab("Proline (mg/l)") + scale_y_continuous(breaks = c(seq(0, 25, 5))) + 
+  ylab("Number Wines") + ggtitle("Distribution of Proline by Category")
+
+
+
+#' 
+## ----proline shapiro-----------------------------------------------------------------------------
+
+shapiro.test(vino$Proline)
+
+#' 
+#' 
+#' Boxplot of Proline by Category, I have included the quantiles. Means are in white numbers. Category 1 does not overlap 
+#' with Categories 2 or 3:
+#' 
+#' 
+## ----proline box---------------------------------------------------------------------------------
+
+vino %>% select(Category, Proline) %>% mutate(Category = factor(Category)) %>% 
+  ggplot(aes(x = Category, y = Proline, group = Category, fill = Category)) + 
+  geom_boxplot(outlier.colour = "red")  +  ggtitle("Proline") + ylab("Proline") +                                                   
+  stat_summary(fun = "mean", geom = "text", size = 3, color = "white",
+               aes(label = round(after_stat(y), 2)), hjust = 1) + stat_summary(geom = "text", fun = "quantile",
+               aes(label = round(after_stat(y), 2), y = vino$Proline), size = 3, hjust = -.5, vjust = -.5)
+
+#' 
+#' 
+#' #### **Building the Algorithm**
+#' 
+#' Known Nearest Neighbors (kNN) will be used to determine the accuracy of the data in predicting the Category.
+#' 
+## ----set seed, warning=FALSE---------------------------------------------------------------------
+
+set.seed(23, sample.kind = "Rounding")
+
+vino <- vino %>% mutate(Category = factor(Category)) # Convert the Categories column from integers to factors
+
+#' 
+#' 
+#' Separate the data into 80% training set (train_set) and 10% test set (test_set):
+#' 
+## ----partition,echo=TRUE-------------------------------------------------------------------------
+
+test_index <- createDataPartition(vino$Category, times = 1, p = 0.8, list = FALSE)
+train_set <- vino[test_index, ]
+test_set <- vino[-test_index, ]
+
+#' 
+#' 
+#' Train the model using k-fold cross-validation. This kNN model uses multivariate Euclidean distance 
+#' (square root of the squared distance) and is sensitive to outliers. The formula is below. It calculates the 
+#' distance between points p and q:
+#' 
+#' 
+#' ![Euclidean distance](euclid.jpg){width="184"}\
+#' 
+#' kNN 10- fold cross-fold validation is used. This will find the optimal k, and train the model:
+#' \
+#' 
+## ----knn, echo=TRUE------------------------------------------------------------------------------
+
+knn_model <- train(Category ~ ., method = "knn", trControl = trainControl(method = "repeatedcv", repeats = 10, number = 10), 
+                   data = train_set, tuneGrid = data.frame(k = seq(3, 21, 2)))
+
+#' 
+#' 
+#' Plot the different values for k:
+#' 
+#' 
+## ----k plot--------------------------------------------------------------------------------------
+
+ggplot(knn_model, highlight = TRUE)
+
+#' 
+#' 
+#' Print the optimal value of k, and the final model:
+#' 
+## ----k optimal-----------------------------------------------------------------------------------
+
+knn_model$bestTune$k
+
+knn_model$finalModel
+
+#' 
+#' 
+#' Select Accuracy from the statistics generated by the Confusion Matrix, rounded to 4 places:
+#' 
+## ----confusion, echo=TRUE, message=FALSE---------------------------------------------------------
+
+confusionMatrix(predict(knn_model, test_set, type = "raw"), test_set$Category)$overall["Accuracy"] %>%
+  round(4)
+
+#' 
+#' 
+#' Here the varImp function sorts the variables by maximum importance in each Category. Column names X1, X2, and X3 
+#' correspond to Categories 1, 2, and 3 respectively. Compare the list to the chart at the beginning of this paper. 
+#' The parameters that are most important are those with low correlations to Category.
+#' 
+## ----var knn, message=FALSE----------------------------------------------------------------------
+
+varImp(knn_model)
+
+
+#' 
+#' 
+#' The algorithm produced an Accuracy of 73.53%. Not great, so we will regard this as our base case, and find out if 
+#' improvement is possible.
+#' 
+#' #### **Improving the Model**
+#' 
+#' 
+#' 
+#' The first iteration of our model produced an Accuracy 0f 0.7353, or 73.53%. However, as we noted in the data analysis 
+#' section above, several of the parameters' data sets were distinctly less normally distributed than others. 
+#' Though kNN is non-parametric and makes no assumptions about the underlying data, in this section, following the 
+#' suggestion of Professores Oliveri and Forina (4), we will use the log() transform to make those parameters more 
+#' normally distributed, reducing noise and improving the model's accuracy. Notice the use of the Shapiro-Wilk Normality 
+#' test along with the histogram. Though most of the data has an alpha less than 0.05, what we are looking for is improvement 
+#' by using the log() transform, not in absolute terms, but relative to the parameters which appeared to be more 
+#' normally distributed in the original data. 
+#' 
+#' #### **Malic Acid log() transform**
+#' 
+#' Here we will use the log() function to make Malic Acid data more, though not entirely, normally distributed:
+#' 
+#' 
+## ----malic log-----------------------------------------------------------------------------------
+
+malic_log <- log(vino$Malic_acid)
+
+
+#' 
+#' 
+#' Both the malic_log histogram and Shapiro-Wilk test indicate some improvement:
+#' 
+## ----malic log norm, message=FALSE---------------------------------------------------------------
+
+ggplot(data = vino, aes(malic_log)) + geom_histogram(bins = 13, color = "black", fill = "dark red") + 
+  ggtitle("Distribution of Log Transform Malic Acid by Category") + labs(x = "Log Malic Acid", y = "Number of Wines") +
+  scale_x_continuous(breaks = c(seq(0, 6, 0.5)))
+
+
+#' 
+## ----malic log shapiro---------------------------------------------------------------------------
+
+shapiro.test(malic_log)
+
+#' 
+#' Now replace the Malic Acid data in Vino data frame with the log() transformed Malic Acid:
+#' 
+#' 
+## ----malic replace-------------------------------------------------------------------------------
+
+vino <- vino %>% mutate(Malic_acid = malic_log) 
+
+#' 
+#' 
+#' Boxplot of the log() transform of Malic Acid. I have included the quantiles. Means are in dark red numbers. 
+#' White was difficult to see. Note the outliers in Categories 1:
+#' 
+#' \
+#' 
+## ----malic log box-------------------------------------------------------------------------------
+
+vino %>% select(Category, Malic_acid) %>% mutate(Category = factor(Category)) %>% 
+  ggplot(aes(x = Category, y = Malic_acid, group = Category, fill = Category)) + 
+  geom_boxplot(outlier.colour = "red")  +  ggtitle("Malic Acid Content by Category") + ylab("Malic Acid g/l") +                                                   
+  stat_summary(fun = "mean", geom = "text", size = 3, color = "dark red",
+               aes(label = round(after_stat(y), 2)), hjust = 1) +
+  stat_summary(geom = "text", fun = "quantile", aes(label = round(after_stat(y),2), y = vino$Malic_acid), size = 3, 
+               hjust = -.1, vjust = -.1)  
+
+
+#' 
+#' #### **Magnesium log() transform**
+#' 
+
+#' We will use the log() Transform to make the Magnesium data more normal and at the same time replace the Magnesium data 
+#' in the Vino dataframe with the transformed data. Both the histogram and the Shapiro-Wilk test indicate improvement:
+#' 
+## ----Mag log hist--------------------------------------------------------------------------------
+
+vino <- vino %>% mutate(Magnesium = log(Magnesium))
+
+vino %>% ggplot(aes(Magnesium)) + geom_histogram(bins = 20, color = "black", fill = "dark red") +  
+  scale_x_continuous(breaks = c(seq(60, 175, 5))) + xlab("Magnesium (mg/l)") + scale_y_continuous(breaks = c(seq(0, 25, 5))) + 
+  ylab("Number of Wines") + ggtitle("Distribution of Magnesium by Category")
+
+
+#' 
+## ----mag log shapiro-----------------------------------------------------------------------------
+
+shapiro.test(vino$Magnesium)
+
+#' 
+#' 
+#' 
+#' Here is the boxplot using the log() Magnesium. Note the outliers in Category 2:
+#' 
+#' 
+## ----mag box-------------------------------------------------------------------------------------
+
+vino %>% select(Category, Magnesium) %>% mutate(Category = factor(Category)) %>% 
+  ggplot(aes(x = Category, y = Magnesium, group = Category, fill = Category)) + 
+  geom_boxplot(outlier.colour = "red")  +  ggtitle("Magnesium Content by Category") + ylab("Magnesium (mg/l)") + 
+  stat_summary(fun = "mean", geom = "text", size = 3, color = "white", 
+               aes(label = round(after_stat(y), 2)), hjust = 1) + stat_summary(geom = "text", fun = "quantile", 
+               aes(label = round(after_stat(y), 2), y = vino$Magnesium), size = 3, hjust = -.1, vjust = -.1)
+
+#' 
+#' #### **Flavanoids log() transform**
+#' 
+#' 
+#' 
+#' Now we will check to see if using the log() transform will make the Flavanoids data more normal. In this case, however, 
+#' the log() transform showed no improvement, actually increasing the distortion and skewing the data negatively. Similar 
+#' results with the square root and cube root transforms (not shown).We will not use the transformed data in this case.
+#' 
+## ----flav log------------------------------------------------------------------------------------
+
+flav_log <- log(vino$Flavanoids)
+
+#' 
+#' 
+#' 
+## ----flav log hist-------------------------------------------------------------------------------
+
+vino %>% ggplot(aes(flav_log)) + geom_histogram(bins = 20, color = "black", fill = "dark red") +  
+  scale_x_continuous(breaks = c(seq(0, 5.25, .25))) + xlab("Flavanoids") + scale_y_continuous(breaks = c(seq(0, 25, 5))) + 
+  ylab("Number of Wines") +   ggtitle("Distribution of Flavanoids by Category") 
+
+
+#' 
+## ----flav log shapiro----------------------------------------------------------------------------
+
+shapiro.test(flav_log)
+
+#' 
+#' #### **Color Intensity log() transform**
+#' 
+#' Use the log() transformed Color Intensity data in the vino dataframe:
+#' 
+## ----color log add to dataframe------------------------------------------------------------------
+
+vino <-  vino %>% mutate(Color_intensity = log(Color_intensity))
+
+
+#' 
+#' 
+#' Color Intensity histogram after log() transform shows improvement, as does Shapiro-Wilk:
+#' 
+## ----col log hist, echo=FALSE--------------------------------------------------------------------
+
+vino %>% ggplot(aes(Color_intensity)) + geom_histogram(bins = 20, color = "black", fill = "dark red") +  
+  scale_x_continuous(breaks = c(seq(1, 15, 1))) + xlab("Color Intensity") + scale_y_continuous(breaks = c(seq(0, 25, 5))) + 
+  ylab("Number of Wines") +
+  ggtitle("Distribution of Color Intensity by Category") 
+
+
+#' 
+## ----color log shapiro, echo=FALSE---------------------------------------------------------------
+
+shapiro.test(vino$Color_intensity)
+
+#' 
+#' 
+#' Boxplot of Color Intensity by Category:
+#' 
+#' 
+## ----col log box, echo=FALSE---------------------------------------------------------------------
+
+vino %>% select(Category, Color_intensity) %>% mutate(Category = factor(Category)) %>% 
+  ggplot(aes(x = Category, y = Color_intensity, group = Category, fill = Category)) + 
+  geom_boxplot(outlier.colour = "red")  +  ggtitle("Color intensity by Category") + ylab("Color intensity") +                                 
+  stat_summary(fun = "mean", geom = "text", size = 3, color = "white", 
+               aes(label = round(after_stat(y), 2)), hjust = 1) +
+  stat_summary(geom = "text", fun = "quantile", 
+               aes(label = round(after_stat(y), 2), y = vino$Color_intensity), size = 3, hjust = -.5, vjust = -.5)
+
+
+#' 
+#' 
+#' 
+#' #### **OD280 log() transform**
+#' 
+#' 
+#' 
+#' Apply log() transform. No improvement with either the log() transform or the square root transform. Both skew the data 
+#' negatively. Once again we will not use the transformed data in this case.
+#' 
+## ----OD280 log-----------------------------------------------------------------------------------
+
+OD280_log <- log(vino$OD280)
+
+#' 
+#' 
+#' Histogram of log() transform of OD280:
+#' 
+#' 
+## ----OD280 log hist, message=FALSE---------------------------------------------------------------
+
+vino %>% ggplot(aes(OD280_log)) + geom_histogram(bins = 20, color = "black", fill = "dark red") +  
+  scale_x_continuous(breaks = c(seq(0, 5, .5))) + xlab("OD280") + scale_y_continuous(breaks = c(seq(0, 25, 5))) + 
+  ylab("Number of Wines") + ggtitle("Distribution of OD280 by Category")
+
+
+#' 
+## ----OD280 Shap log------------------------------------------------------------------------------
+
+shapiro.test(OD280_log)
+
+#' 
+#' 
+#' 
+#' #### **Proline log() transform**
+#' 
+#' 
+#' 
+#' Applying the log () transform and in the same code replace the data in Vino. Transformed data is more normal:
+#' 
+## ----pro log hist, message=FALSE-----------------------------------------------------------------
+
+vino <- vino %>% mutate(Proline = log(vino$Proline))
+
+vino %>% ggplot(aes(Proline)) + geom_histogram(bins = 20, color = "black", fill = "dark red") +  
+  scale_x_continuous(breaks = c(seq(0.25, 3.75, 0.25))) + xlab("Proline (mg/l)") + scale_y_continuous(breaks = c(seq(0, 25, 5))) + 
+  ylab("Number Wines") +
+  ggtitle("Distribution of Proline by Category")
+
+
+#' 
+## ----log proline shapiro-------------------------------------------------------------------------
+
+shapiro.test(vino$Proline)
+
+#' 
+#' 
+#' Boxplot of Proline by Category, I have included the quantiles. Means are in white numbers:
+#' 
+#' 
+## ----pro log box---------------------------------------------------------------------------------
+vino %>% select(Category, Proline) %>% mutate(Category = factor(Category)) %>% 
+  ggplot(aes(x = Category, y = Proline, group = Category, fill = Category)) + 
+  geom_boxplot(outlier.colour = "red")  +  ggtitle("Proline") + ylab("Proline") +                                                   
+  stat_summary(fun = "mean", geom = "text", size = 3, color = "white",
+               aes(label = round(after_stat(y), 2)), hjust = 1) + stat_summary(geom = "text", fun = "quantile",
+                  aes(label = round(after_stat(y), 2), y = vino$Proline), size = 3, hjust = -.5, vjust = -.5) 
+
+#' 
+#' #### **kNN using log() transformed data**
+#' 
+#' 
+#' 
+#' Now we will rerun the kNN model using the transformed data. Vino will be renamed vino2:
+#' 
+## ----vino_2--------------------------------------------------------------------------------------
+
+vino2 <- vino
+
+#' 
+#' 
+#' The model:
+#' 
+## ----seed, echo=TRUE, warning=FALSE--------------------------------------------------------------
+
+set.seed(65, sample.kind = "Rounding")
+vino2 <- vino2 %>% mutate(Category = factor(Category)) # Change Category from an Integer to a factor
+
+
+#' 
+#' 
+#' 
+#' Separate the data into 80% training set (train_set) and 20% test set (test_set):\
+#' 
+## ----partition log, echo=TRUE--------------------------------------------------------------------
+
+test_index <- createDataPartition(vino2$Category, times = 1, p = 0.8, list = FALSE)
+train_set <- vino2[test_index, ]
+test_set <- vino2[-test_index, ]
+
+
+#' 
+#' Train the model using k-fold cross-validation. This will take a few seconds.
+#' 
+#' 
+#' 
+## ----knn train, echo=TRUE------------------------------------------------------------------------
+
+knn_model <- train(Category ~ ., method = "knn", trControl = trainControl(method = "repeatedcv", repeats = 20, number = 20, p = 0.9),
+                   data = train_set, tuneGrid = data.frame(k = seq(3, 21, 2)))
+
+
+
+#' 
+## ----k plot with log-----------------------------------------------------------------------------
+
+ggplot(knn_model, highlight = TRUE)
+
+
+#' 
+#' Print the optimal value of k and the final model:
+#' 
+## ----k optimal log, message=FALSE----------------------------------------------------------------
+
+knn_model$bestTune$k
+
+knn_model$finalModel
+
+
+#' 
+#' Model Accuracy
+#' 
+## ----confusion vino2, echo=TRUE, message=FALSE---------------------------------------------------
+
+confusionMatrix(predict(knn_model, test_set, type = "raw"), test_set$Category)$overall["Accuracy"]
+
+
+
+#' 
+#' After transforming some of the data the Accuracy of the algorithm improves substantially to 97.06%.
+#' 
+#' 
+#' #### **Random Forest**
+#' 
+
+#' Now we will create a model using Random Forest. Random Forest creates a number of decision trees, then averages them together.
+#' 
+## ----set seed rf, echo=TRUE, warning=FALSE-------------------------------------------------------
+
+set.seed(23, sample.kind = "Rounding")
+
+vino_rf <- vino_rf %>% mutate(Category = factor(Category)) # Convert the Categories column from integers to factors
+
+
+#' 
+#' To reduce the likelihood of overfit, 90% of the vino_rf data will be used to train the Random Forest algorithm:
+#' 
+## ----rf partition, echo=TRUE---------------------------------------------------------------------
+
+test_index <- createDataPartition(vino_rf$Category, times = 1, p = 0.9, list = FALSE)
+train_set <- vino_rf[test_index, ]
+test_set <- vino_rf[-test_index, ]
+
+#' 
+#' The mtry element determines how many parameters are used for each tree. The size of mtry defaults to the square root of the 
+#' number of parameters. vino has 13 parameters so we consider SQRT(13), which is 3 between 4. This code will optimize mtry and 
+#' train the model.
+#' 
+#' 
+#' 
+## ----rf, message=FALSE, warning=FALSE, echo=TRUE-------------------------------------------------
+
+control <- trainControl(method = "repeatedcv", number = 10, p = 0.9)
+
+grid <- data.frame(mtry = c(3, 4))
+
+train_rf <-  train(Category ~ ., 
+                   method = "rf", 
+                   data = train_set,
+                   ntree = 500,
+                   trControl = control,
+                   tuneGrid = grid)
+
+
+#' 
+#' 
+#' 
+## ----best Tune-----------------------------------------------------------------------------------
+
+train_rf$bestTune
+
+#' 
+#' 
+#' 
+#' Accuracy for the Random Forest algorithm:
+#' 
+## ----rf confusion, echo=TRUE---------------------------------------------------------------------
+
+confusionMatrix(predict(train_rf, test_set), test_set$Category)$overall["Accuracy"] %>% round(digits = 4)
+
+
+#' 
+#' 
+#' Accuracy with Random Forest was 93.75%, slightly less than kNN, but without transforming any data.
+#' 
+#' Here is the list of parameters by importance. The order is a little different than KNN. Interestingly, the last two parameters, 
+#' Ash and especially Nonflavanoids Phenols, contribute little or nothing:
+#' 
+## ------------------------------------------------------------------------------------------------
+
+varImp(train_rf)
+
+
+#' 
+#' 
+#' 
+#' Table of algorithm Results:
+#' 
+## ------------------------------------------------------------------------------------------------
+tibble(`Algorithm` = c("KNN", "KNN (log transform)", "Random Forest"),
+       `Accuracy` = c("73.53%", "94.12%", "93.75%")) %>% kbl() %>% 
+  kable_styling(latex_options = c("striped", "HOLD_position"),  
+full_width = F, position = "center")
+
+
+#' 
+#' #### **Conclusion**
+#' 
+
+#' We were able to build an algorithms that classifies the wines with high degree of accuracy. The first iteration of the 
+#' kNN algorithm result was better than a coin flip, but was improved substantially by using the log() transform on some of 
+#' the parameters, while the RandomForest algorithm is accurate with the original data. kNN transformed was marginally the 
+#' most accurate.
+#' 
+#' Weather has an important impact on the wine of a given vintage. Rainfall, for example, is critical, but too much rain, 
+#' especially late in the cycle, can dilute the juice in the grapes and will produce weak and flabby wines. During harvest 
+#' too much rain can cause grapes to split open and increase the risk of mold, mildew, and various diseases developing. 
+#' Including data on average rainfall versus actual rainfall in a given year for the various microclimates is one possible 
+#' way to improve accuracy. Another more robust factor would the aromatics of the wines. Grape varietals emit distinctive 
+#' aromatic compounds (as every wine snob knows) which can be identified using, for example, a gas chromatograph. This could 
+#' very well make the models close to 100% accurate.
+#' 
+#' 
+#' 
+#' #### **References and Resources**
+#' 
+
+#' (1) Introduction to Data Science:Rafael A. Irizarry, Professor and Chair of the Department of Data Science at Dana-Farber 
+#' Cancer Institute and Professor of Applied Statistics at Harvard.
+#' 
+#' (2) University of California at Irvine Machine Learning Repository.
+#' 
+#' (3) M. FORINA, c. ARMANINO, M. CASTINO and M. UBIGLI (1986): Multivariate data analysis as a discriminating method of the 
+#' origin of wines. See Appendix 2.
+#' 
+#' (4) Oliveri, Paolo & Forina, Michele. (2012). Data Analysis and Chemometrics. Chemical Analysis of Food: Techniques and Applications.
+#'  25.10.1016/B978-0-12-384862-8.00002-9. <https://www.researchgate.net/publication/236854165_Data_Analysis_and_Chemometrics>.
+#' 
+#' (5) Parker's Wine Buyers Guide (1989), Robert M. Parker, pp. 474 to 505.
+#' 
+#' (6) Conversations with Georg Salzner, President, Castello di Amarosa, Calistoga, California.
+#' 
+#' (7) Conversations with Sheldon Richards, Owner and Winemaker, Paloma Vineyard, St Helena, California.
+#' 
+#' (8) Statology.com: a great resource for referencing R code.
+#' 
+#' (9) R-bloggers.com: another valuable resource for R.
+#' 
+#' (10) <https://www.sciencedirect.com/science/article/abs/pii/S0953620503900021>
+#' 
+#' (11) <https://www.winespectator.com/articles/why-is-wine-good-for-your-heart>
+#' 
+#' (12) <https://www.sciencedirect.com/science/article/abs/pii/014067369291277F>
+#' 
+#' (13) <https://en.m.wikipedia.org/wiki/Denominazione_di_origine_controllata>
+#' 
+#' (14) <https://raw.githubusercontent.com/rstudio/cheatsheets/main/rmarkdown-2.0.pdf>
+#' 
+#' (15) <https://rpruim.github.io/s341/S19/from-class/MathinRmd.html>
+#' 
+#' (16) <https://bookdown.org/yihui/rmarkdown/>
+#' 
+
+#' 
+#' #### **Appendix 1**
+#' 
+
+#' Email from Professore Paolo Oliveri, responding to my inquiry:
+#' 
+#' ```         
+#'  On Wednesday, December 21, 2022, 3:15 PM, Paolo Oliveri [Paolo.Oliveri@unige.it](mailto:Paolo.Oliveri@unige.it){.email} wrote:
+#' ```
+#' 
+#' Dear Phil,
+#' 
+#' Thanks for your enquiry. Concerning your questions:
+#' 
+#' 1.  Yes, you are right. It is a subset.
+#' 
+#' 2.  You are right also in this case. Actually, Barbera and Grignolino are also denominations (a bit modified, nowadays). 
+#' Probably (I was 4 years old, at that time), the Authors of the original paper preferred to refer to the denominations, 
+#' rather than to the cultivar, considering that the differences highlighted might be due also to geographical production factors. 
+#' Please, find the paper attached. If you need more detailed information, I can ask Prof. Forina.
+#' 
+#' Best wishes,
+#' 
+#' Paolo
+#' 
+#' Paolo Oliveri, PhD Associate Professor Analytical Chemistry and Chemometrics Department of Pharmacy (DIFAR) University of Genova
+#' 
+#' a.  Viale Cembrano, 4 -- 16148 Genova (IT)
+#' 
+#' b.  (+39) 010 353 2626 (office) -- 2642 (lab) \@ [paolo.oliveri\@unige.it](mailto:paolo.oliveri@unige.it){.email} iD orcid.org/0000-0002-3722-9461
+#' 
+
+#' 
+#' #### **Appendix 2**
+#' 
+#' 
+#' 
+#' Following is the original paper from 1986 that Professore Oliveri forwarded to me. I included this in its entirety for those who 
+#' might be interested.
+#' 
+#' Vitis 25, 189---201 (1986)
+#' 
+#' Istituto di Analisi e Tecnologie Farmaceutiche ed Alimentari, Universitå di Genova, Italia Istituto Sperimentale per l'Enologia, Asti, Italia
+#' 
+#' Multivariate data analysis as a discriminating method of the origin of wines by
+#' 
+#' M. FORINAI ), C. ARMANINOI ), M. CASTIN02) and M. UBIGL[^1]2)
+#' 
+#' [^1]: ) Istituto di Analisi e Tecnologie Farmaceutiche ed Alimentari, Universitå di Genova. 2) Istituto Sperimentale per l'Enologia» Asti.
+#' 
+#' Multivariable Datenanalyse zur Sortenklassifizierung von Weinen
+#' 
+#' Z u s a m m e n f a s s u n g : Die Analysendaten von 178 Weinen aus Piemont, die drei verschiedenen Rebsorten angehörten (Barbera, Grignolino, Barolo), wurden mit Hilfe der multivariablen Datenanalyse ausgewertet, um Modelle der Sortencharakteristik zu erstellen und untypische Proben auszusondern. Durch Auswahl der Merkmale („Fisher-Gewichte") blieben von den ursprünglich 28 chemischen und physikalisch-chemischen Variablen aufgrund ihrer hohen eindimensionalen Unterscheidbarkeit 8 Variable übrig. Auf den achtdimensionalen Datensatz wurden verschiedene Klassifizierungsmethoden (KNN, LDA, PCA) und Techniken statistischer Modelle (Bayes-Statistik, SIMCA) angewandt; die Klassifizierbarkeit lag bei 98 %.
+#' 
+#' Key words : wine, analysis, characteristic, variety of vine, statistics, Italy.
+#' 
+#' Introduction
+#' 
+#' All the factors helping in the production of certified-origin wines must comply with several laws and regulations which impose various limitations. These limitations do not apply to the final product, they are concerned with the vine-growing soil, the grape yield per hectare, the harvest time, and so on. They are in fact control procedures from vine growing to wine making which aim at assuring the production of wines showing constantly the distinctive parameters which give them the V.Q.P.R.D. appellation (Vins de qualité produits dans des régions déterminées). Beside the above, other laws command the wine ready to be sold to conform to fixed standards. According to the item 14 of EEC Act 338/79, for instance, the appellation of origin of a wine cannot fit wines not conforming to the same chemical and sensorial characteristics.
+#' 
+#' Wine tasters may sometimes reach surprising results by sensorial analysis; it is obvious, however, that the only use of sensorial analysis cannot be accepted as a universally valid criterion and accordingly it cannot be taken for the only discriminant factor, even though it gives useful and often basic contributions.
+#' 
+#' Chemical and physico-chemical analyses, on the other hand, give accurate and precise results, the only contribution of which is, still, quite often inadequate to fully describe the typical characteristics of a wine.
+#' 
+#' According to the EEC Act quoted above, only a few parameters must be checked (density, alcoholic degree, total acidity, fixed and volatile acidity, extracts, sugars, sulphur dioxide) which are not strictly linked to the geographic origin of the considered wine. It is obvious that the characterization of typical wines based on chemical analysis would definitely be the more objective way of classification; in addition, such a method would be less liable to criticisms than the subjective sensorial analysis. In fact, many authors tried to classify wines from different regions and cultivars, using several chemical variables.
+#' 
+#' Inorganic constituents have been largely used; they are, to some extent, relatable to the soil composition and then could be a means of classifying wines on the basis of vine-root selective absorption. Several and differently grouped elements were considered: the basic groups ranged from a minimum of 5---6 elements (18, 26, 29), chosen among the more abundant and easily detectable to a maximum of 15---16 (2, 14, 28), europium, thallium, hafnium and rubidium included. The use of trace elements as variables may lead to interesting results even though the instruments and experience requested are not easily available, while minimal and occasional pollution with trace elements might occur, thus biasing the results.
+#' 
+#' Proteins (6), amino acids (20) and enzymes (34) are highly selective variables themselves. The use of enzymes as discriminating factors between different cultivars is questionable, owing to the enzyme instability in alcoholic media. Yeast activity on amino acids and enzymatic hydrolysis or precipitation of proteins, on the other hand, are factors strongly limiting the use of those parameters as variables.
+#' 
+#' Table 1
+#' 
+#' Data and variables • a) Categories and number of samples, b) Variables
+#' 
+#' Daten und Variable • a) Kategorien und ihre Stichprobenzahl, b) Variable
+#' 
+#' Samples per year
+#' 
+#' 1.  Cat.index Cat.name Total
+#' 
+#'     '70 '71 '72 '73 '74 '75 '76 '77 '78 '79
+#' 
+#'     ![](media/4d05157321a0bd72fe0e4e6eab3a180b.jpg)
+#' 
+#'     1.  Barolo 19 20 20 59
+#'         1.  Grignolino 9 9 7 9 16 9 12 71
+#' 
+#'         2.  Barbera 9 5 29 5 48
+#' 
+#'             ![](media/990b2af0d07ceeb50c4da56e73d46c5a.jpg)
+#' 
+#' 2.  1 Alcohol
+#' 
+#'     1.  Sugar-free extract
+#' 
+#'     2.  Fixed acidity
+#' 
+#'     3.  Tartaric acid
+#' 
+#'     4.  Malic acid (total, see 'Literature' (20))
+#' 
+#'     5.  Uronic acids
+#' 
+#'     6.  pH
+#' 
+#'     7.  Ash
+#' 
+#'     8.  Alcalinity of ash
+#' 
+#'     9.  Potassium
+#' 
+#'     10. Calcium
+#' 
+#'     11. Magnesium
+#' 
+#'     12. Phosphate
+#' 
+#'     13. Chloride
+#' 
+#'     14. Sulphate
+#' 
+#'     15. Total phenols
+#' 
+#'     16. Flavanoids
+#' 
+#'     17. Nonflavanoid phenols
+#' 
+#'     18. Proanthocyanins
+#' 
+#'     19. Color intensity
+#' 
+#'     20. Hue
+#' 
+#'     21. ![](media/df7d58d003932564259782fb033dc841.jpg)of diluted wines
+#' 
+#'     22. ![](media/2bf5c7b6f021315793042212b83f2054.jpg)of flavanoids
+#' 
+#'     23. Glycerol
+#' 
+#'     24. 2,3-butanediol
+#' 
+#'     25. Total nitrogen
+#' 
+#'     26. Proline
+#' 
+#'     27. ![](media/e112a5ad8d917e42b21ee72403af1465.jpg)Methanol
+#' 
+#' Discriminant analyses were successfully based on volatile components of wines easily detectable by gas chromatography (21, 22, 24, 25). Owing to the presence of typical terpenes (5, 23, 27), wines from aromatic grapes, Muscat in particular, can be easily recognized. Given that the majority of the volatile compounds comes from the yeast activity, the occurrence of these compounds, at least from a qualitative point of view, is quite the same even in different wines. Differences in wine origin seem to be yet responsible for the different extent to which these components occur, and it is proved true for both 2,3-butendiol (4) and propanol-l (3). Similarly, a good discrimination was obtained, both for white and red wines, but taking into account a few volatile components simultaneously (16, 17, 19). KWAN and KOWALSKI (13) obtained good results by multivariate analysis of inorganic and volatile components in wines.
+#' 
+#' ```         
+#'     We carried out the mutivariate analysis of 28 variables listed in Table 1, using the package PARVUS (7) which provides for classification, clustering and modelling. 178 wine samples subdivided into vintages and including Barolos, Barberas and Grignolinos (32, 33, 34) were used. All wines were from Piedmont, each of them deriving from a single cultivar, while the production areas overlap, at least in part.
+#' 
+#'     Feature selection
+#' 
+#'     Fisher weights (interclass variance/intraclass variance ratio) were calculated for each category pair and for all the data (Table 2). 9 variables showed high univariate
+#' 
+#'     Table 2
+#' 
+#'     Fisher weights of the variables • a) Total, b) between categories 1 and 2, c) between categories 1 and 3, d) between categories 2 and 3
+#' 
+#'     Fisher-Gewichte der Variablen • a) Insgesamt, b) zwischen den Kategorien 1 und 2, c) zwischen den
+#' 
+#'     Kategorien 1 und 3, d) zwischen den Kategorien 2 und 3
+#' 
+#'     ![](media/89a38121619bd8cddb8d02409de932ef.jpg)
+#' ```
+#' 
+#' | 17  | 8.13 | 1.3 | 20.2 | 2.9 |
+#' |-----|------|-----|------|-----|
+#' | 22  | 5.07 | 0.4 | 11.0 | 3.8 |
+#' | 23  | 3.05 | 0.0 | 6.4  | 2.8 |
+#' | 27  | 3.03 | 4.9 | 3.9  | 0.3 |
+#' | 15  | 2.89 | 3.9 |      | 0.1 |
+#' | 21  | 2.70 | 0.0 | 5.5  | 2.6 |
+#' | 16  | 2.44 | 0.8 | 5.7  | 0.8 |
+#' |     | 2.14 | 4.3 | 0.7  |     |
+#' | 20  | 2.04 | 2.5 | 0.5  | 3.1 |
+#' 
+#' ![](media/cb19462bd59c6f602d17376d2734c1c3.jpg) 0.97 0.0 2.0 0.9
+#' 
+#' 0.82 0.0 1.3 1.2
+#' 
+#' 0.79 0.6 1.7 0.1
+#' 
+#' 0.78 0.2 0.7
+#' 
+#' | 19  | 0.75 |     | 1.7 | 0.4 |
+#' |-----|------|-----|-----|-----|
+#' |     | 0.66 | 0.0 | 1.1 | 0.9 |
+#' | 24  | 0.62 |     |     | 0.3 |
+#' | 18  | 0.58 | 0.3 | 1.2 | 0.2 |
+#' | 13  | 0.50 | 0.8 | 0.6 | 0.0 |
+#' 
+#' discriminant ability. 8 of them (alcohol, total phenols, flavanoids, colour intensity, hue, ![](media/dd9f7bbea795419d0450a99c463ef610.jpg)of diluted wines, ![](media/f0411a37e6f4c5366281d43cc3742c49.jpg)of flavanoids, proline) were used for classification and modelling analysis. Sulphates were eliminated since they can partly come from chemically treated cooperage. Among the discarded variables only the net extract (the Fisher weight of which is I in the discrimination between Barolo and Grignolino) as well as uronic acids (the Fisher weight of which is 1.2 in the discrimination between Barbera and Grignolino) showed some discriminant ability. The other variables showed discriminant ability between Barolo and Barbera; f01' these two classes of wines some out of the 8 selected variables (flavanoids, ![](media/9e508c93e739ab80a2742c2185d64419.jpg) of diluted wines) have so high Fisher weights as to give a perfect classification.
+#' 
+#' Feature selection by univariate criteria (Fisher weights) is highly criticizable. We used this method simply as a preselective technique in order to make the subsequent methods applicable and faster, otherwise the number of objects should have been drastically reduced in order to use all the variables in SIMCA, due to the limited capacity of PARVUS. We also used multivariate criteria of feature selection. The best results were obtained with a recently introduced method, the stepwise Bayesian analysis (9); the results are going to be published.
+#' 
+#' Correlation analysis --- Typical correlations
+#' 
+#' The correlation coefficients of the 8 variables let us single out the following highly meaningful correlations for all the wine samples:
+#' 
+#' | a) ![](media/2d1b882352e8ddc980e0baa55588672c.jpg)of diluted wines and ![](media/388d48e2c814f3a49129a666c87203a4.jpg)of flavanoids | r = 0.91 |
+#' |----------------------------------------------|--------------------------|
+#' | b) Total phenols and flavanoids                                                                                                     | r = 0 86 |
+#' 
+#' 1.  Flavanoids and of diluted wines r = 0 78
+#' 2.  Color intensity and of flavonoids r = 0.72
+#' 
+#' | Color intensity and OD280 Total phenols and ![](media/3be1491549b3a6a956c0601216a5d747.jpg)of diluted wines | r = 0 71 r = 0.70 |
+#' |----------------------------------------------|--------------------------|
+#' 
+#' In each wine class we can single out the correlations (or the lack of correlation) typical of each category. For the class Barolo correlations c and f disappear, while they diminish only slightly for the class Grignolino. The class Barbera has also correlation b. The class Barolo shows high correlation between flavanoids and color intensity, which is not meaningful when all the data are considered.
+#' 
+#' Very high correlations show that the real dimension of the system is lower than the variable number.
+#' 
+#' Principal component analysis
+#' 
+#' Raw data have been autoscaled (11) and the eigenvectors of the covariance generalized matrix computed.
+#' 
+#' The eigenvectors form a new system of Cartesian coordinates, obtained by orthogonal rotation. Rotation is characterized by direction cosines (loadings) among eigenvectors and original variables. The greater the absolute value of a loading, the greater is the contribution of the corresponding variable to that eigenvector.
+#' 
+#' The sample (object) coordinates are named scores in the new eigenvector system. The significance analysis of eigenvectors has been carried out by the methods of average variance criterion, inbedded function criterion and screen test (15). The first two criteria show two significative eigenvectors, while the graphic evaluation of screen test is doubtful for two or three components. The first two eigenvectors alone contain almost 80 0/0 of the information. They are the axes of the plot of scores in Fig. 1 and of the plot of loadings in Fig. 2. The plot of scores shows that the used variables contain enough information to allow a good graphic separation of the categories. In the tridimensional plot of Fig. 3 (10), the separation is even clearer. The plot of loadings shows the contribution of the variables to the more significant eigenvectors; it displays the same variables as regards the data fundamental structure and it gives information already obtained in part from correlation study.
+#' 
+#' ![](media/8f34377fc6fbdb896111b4a4df19a033.jpg)
+#' 
+#' E i genuector N. 1
+#' 
+#' Fig. 1: Eigenvector projection of the samples. --- 1: Barolo, 2: Grignolino, 3: Barbera. Eigenvektor-Projektionen der Stichproben.
+#' 
+#' By further axis clockwise rotation of about 90 0 in the plane of the principal components of Fig. 2, two new directions are located: the one seems principally formed by chromatic variables, while the other one is principally formed by chemical variables.
+#' 
+#' Ideally overlapping the loading plot to the score plot, we can see that the chromatic factor is important in Grignolino and Barbera discrimination; on the other hand, the
+#' 
+#' chemical factor discriminates between Barolo and Grignolino.
+#' 
+#' Linear discriminant analysis
+#' 
+#' Linear discriminant analysis, LDA (30), is based on amplified statistical model, where categories are supposed to have equal covariance matrices; the differences among categories are supposed to derive from the different position of category barycenters (centroids) only in the variable hyperspace. The pooled covariance matrix is calculated as the mean of the covariance matrices of the categories.
+#' 
+#' ![](media/c54ed1b8487be626380bea5e24adecb2.jpg)
+#' 
+#' Loadings on component n. 1
+#' 
+#' Fig. 2: Loadings on the first components of the generalized covariance matrix (indices of variables of Table 1).
+#' 
+#' Ladungen auf den ersten Komponenten der verallgemeinerten Kovarianzmatrix (Indizes der Variablen von Tab. 1).
+#' 
+#' The study of typical correlation showed a wide difference in the correlation among the three categories. In spite of that, as many other cases showed, the very simplified model of LDA produced good results.
+#' 
+#' The results of LDA were displayed using, as plot axes, the eigenvectors (canonical variables) of the asymmetrical matrix obtained premultiplying the centroid dispersion matrix by the inverted pooled covariance matrix (12).
+#' 
+#' Fig. 4 shows the discrimination in the plane of the two canonical variables: excluding one sample of Grignolino, the three categories may be linearly separated. The LDA ability was proved by a random subdivision of the data into two subsets (training and evaluation set). In the first set, the statistical parameters were calculated (centroid axes, pooled covariance matrix). Then the classification of objects was carried out by computing, for each object, the Maharanis distance (31) from the three centroids and classifying it as belonging to the category of the nearest centroid.
+#' 
+#' WINE SAMPLES I N SPACE OF FIRST THREE PR INC IPAL COMPONENTS CUBES- BAROLO ![](media/ad0c685aad1b89c145a431db7c4ddf31.jpg) INO INVERT PYR- BARBERA
+#' 
+#' ![](media/8132252d9ce64c67513f8a4027e6db8f.jpg)
+#' 
+#' Fig. 3: Multidimensional plot of the first three eigenvectors.
+#' 
+#' Multidimensional Darstellung der ersten drei Eigenvektoren.
+#' 
+#' Modelling analysis
+#' 
+#' The classification method of the first level of pattern recognition (1), as LDA, KNN, Learning Machine, do not single out anomalous samples. In fact, these samples are always classified in one of the categories of the problem even if the measured variables are very different from those typical of the categories.
+#' 
+#' Recognition ability is the percentage of training set objects correctly classified; predictive ability is the percentage of evluation set objects correctly classified; the objects in the evaluation set were not used to compute statistical parameters and they were used by statistical method as unknown category objects.
+#' 
+#' On a sequence of 10 random subdivisions between training and evaluation set, with 40---60 objects (22---34 %) in evaluation set, both the recognition and predictive ability were found to be 97---98 % and 95---99 % , respectively. The errors were always caused by the same samples (two of Barolo and three of Grignolino) every time differently distributed between training and evaluation set.
+#' 
+#' By modelling methods, Bayesian analysis and SIMCA, it is possible to select anomalous samples and evaluate how well each object fits into the category model. It is also possible to obtain a measure of the peculiarities of the object. Obviously the meaning of these peculiarities is limited by the variables used for the model.
+#' 
+#' For each modelling method, in each category, the borders of the part of the hyperspace of the variables in which the category samples are contained were computed. Each object occurring within this space was considered as belonging to the category. All the objects occurring outside the category space and used to compute the category model itself are considered outliers. In this case the model was recomputed without their contribution.
+#' 
+#' ![](media/e9deda711de950f27d7d28ea83ca9ad4.jpg)
+#' 
+#' E l genuector N. 1
+#' 
+#' Fig. 4: LDA: discrimination in the plane of the two canonical variables.
+#' 
+#' LDA: Diskriminanzfunktion in der Ebene der zwei kanonischen Variablen.
+#' 
+#' We singled out the discarded objects and so we recomputed the model by a procedure (8) which involves the evaluation of the scores on the principal components of the category, the estimation of the significance level and the evaluation of their histogram.
+#' 
+#' In modelling methods, the confidence level which fixes the borders of the category space may be modified by increasing or reducing the category space according to the particular demands of the problem and/or knowledge of the sample. In Bayesian method, the category model is a point, the category centroid, and the category space is given by a confidence hyperellipsoid at a predetermined confidence level.
+#' 
+#' Table 3 shows some of the results obtained by this method. They refer to a model computed after the elimination of some non-typical objects (sample too different from the mean composition of the class). Fig. 5 shows, in the plane of the two principal eigenvectors (eigenvectors of the generalized covariance matrix, computed on all the 178 objects), the category spaces computed by the Bayesian technique, before and after having discarded the outliers.
+#' 
+#' Table 3
+#' 
+#' Results of the second cycle of Bayesian analysis
+#' 
+#' Ergebnisse des zweiten Durchgangs der Bayes-Statistik
+#' 
+#' Outliers Accepted (95 0/0 conf.lev.) by cat.
+#' 
+#' | Category    | Discarded | 95 %     | 98 %     | 1   | 2      | 3   |
+#' |-------------|-----------|----------|----------|-----|--------|-----|
+#' | 1 2 3 Total | 8 4 4 16  | 8 7 6 21 | 2 4 5 11 | 4   | 1 3 11 | 3   |
+#' 
+#' General classification matrix
+#' 
+#' Computed category
+#' 
+#' "%" of correct
+#' 
+#' True category classifications
+#' 
+#' 1 2 3
+#' 
+#' 1.  59 100
+#' 2.  68 3 95.8 3 1 47 97.9
+#' 
+#' Total classification errors: 4
+#' 
+#' Total of correct classifications: 97.8 %
+#' 
+#' In SIMCA method the model is a segment, or a part of a plane, or a part of a hyperplane; the axes are given respectively by one, two or more significant components of the category of the objects (eigenvectors of the covariance matrix of the category). By means of a computation based upon the distance of the objects from the model, the category space, called SIMCA box, is built around the model. The borders of the model are computed assuming the range of the scores on the components (raw model) as a basis and then extending (1) or reducing (8) the model, considering the number of the objects and their distribution. The results are listed in Table 4 and displayed in Fig. 6; they refer to a reduced model, formed by two components, computed after the elimination of some non-typical objects, as Bayesian technique does.
+#' 
+#' Beside box shapes, the main difference between SIMCA and Bayesian methods lies in the fact that in SIMCA an object very close to the model plane and within its limits has a high fiducial level (and then a high fitting to the category model), though comparatively far from the category centroid; on the contrary, in Bayesian technique the high distance from the centroid gives the object a poor fitting into the category model.
+#' 
+#' CAsTINo•and
+#' 
+#' ![](media/a75917c842ddf923aa57243b2020625f.jpg)
+#' 
+#' E i genvector N. 1
+#' 
+#' Fig. 5: Bayesian analysis: first (wider) and second cycle confidence hyperellipsoids (95 % confidence level) of the categories, projected on the plane of the first two eigenvectors.
+#' 
+#' Bayes-Statistik: Konfidenz-Hyperellipsoide der Kategorien im ersten (weiten) und im zweiten Durchgang (95 %-Niveau): Projektion auf die Ebene der beiden ersten Eigenvektoren.
+#' 
+#' ![](media/215b47e47946a559cf79cd349e981f13.jpg)
+#' 
+#' E i genvector N. 1
+#' 
+#' Fig. 6: SIMCA analysis: models of the categories before and after (marked) the elimination of the outliers.
+#' 
+#' SIMCA-Analyse: Modelle der Kategorien vor und nach (s. Zeichen) Entfernung der Außenseiter.
+#' 
+#' The model will be more significant when, in addition to the suitable chemical variables, the sensorial variables for quality and typical character evaluation will be available. Then, the basic correlation between the sensorial variables with the principal components of the categories will show which model is preferable. In spite of the lack of these elements, the data listed in Table 4 show that among the 178 samples only 8 (4.5 %) do not fall into their category model at the 98 % confidence level. 8 other samples, on the other hand, are accepted at 95 0/0 confidence level by categories different from their proper one. Therefore, only 1 sample of Grignolino may be assigned to Bar010 category, while using SIMCA as a pure classification method, 2 samples fall into the
+#' 
+#' Barolo class.
+#' 
+#' Table 4
+#' 
+#' Results of modeliing analysis by SIMCA, two-component category models, second cycle
+#' 
+#' Ergebnisse der Modellanalyse mittels SIMCA, Modelle für zwei Komponenten umfassende Kategorien, zweiter Durchgang
+#' 
+#' Discarded Outliers Accepted (95 % conf.lev.) by cat.
+#' 
+#' | Category    | samples | 95 %     | 98 0/0  | 1   | 2     | 3   |
+#' |-------------|---------|----------|---------|-----|-------|-----|
+#' | 1 2 3 Total | 3 2 4 9 | 4 4 4 12 | 2 2 4 8 | 1   | 2 2 8 | 3   |
+#' 
+#' General classification matrix
+#' 
+#' Computed category 0/0 of correct
+#' 
+#' True category classifications
+#' 
+#' 1 2 3
+#' 
+#' | 1 59                              |         |     | 100  |
+#' |-----------------------------------|---------|-----|------|
+#' | 2 2                               | 68      | 1   | 95.8 |
+#' | 3 0                               | 1       | 47  | 97.9 |
+#' | Total classification errors:      | 4       |     |      |
+#' | Total of correct classifications: | 97.75 % |     |      |
+#' 
+#' Conclusive remarks
+#' 
+#' The previous discussion emphasizes a situation which leads to some important considerations: First, it is noticeable that few, incidentally easily determinable variables, providing a sharp separation between wines from the same vineyard area, have been selected. Among these, phenolic compounds are widely represented.
+#' 
+#' It is important to remark, however, that the appropriateness of our choice depends on the nature of the wines we are trying to separate. As a matter of fact, each of the tested wines is produced from different and typical vine cultivars.
+#' 
+#' CASTINO and
+#' 
+#' Summary
+#' 
+#' A data set of 178 wines from Piedmont (Barbera, Grignolino, Barolo) was evaluated by multivariate data analysis in order to both build the category models and single out anomalous samples. By feature selection (Fisher weights) only 8 variables, out of the 28 chemical and physico-chemical original variables of the data set, were selected on account of their high univariate discriminant ability. Classification methods (KNN, LDA, PCA) and modelling techniques (Bayesian analysis, SIMCA) were applied to the 8-dimension data set; classification ability was about 98 %.
+#' 
+#' Literature cited
+#' 
+#' 1.  ALBANO, C.; BLOMQVIST, G.; WOLD, H.; 1981: Pattern recognition by means of disjoint principal component model (SIMCA). Philosophy and method. Symposium on Applied Statistic, Copenhagen, January 1981, 1---34.
+#' 
+#' 2.  BORSZÉKI, J.; KOLTAY, L.; INCZÉDY, J.; GEGUS, E.; 1983: Untersuchung der Mineralstoffzusammensetzung von Weinen aus Transdanubien und ihre Klassifikation nach Weingegenden. Z. Lebensm.-Untersuch. u. Forsch. 177, 15---18.
+#' 
+#' 3.  CANTAGREL, R.; SYMOND, P.; CARLES, J.; 1978: Influence du cépage sur les produits de la fermentation alcoolique: le propanol-l. Médic. et Nutr. 14, 411---413.
+#' 
+#' 4.  CASTINO, M.; DI STEFANO, R.; 1975: Correlazione fra cultivar di origine e loro tenore in 2,3-butandiolo. Vini d'ltalia 17, 233---238.
+#' 
+#' 5.  DRAWERT, F.; SCHREIER, P.; 1978: Caractérisation des raisins et des Vins å l'aide de certains constituants remarquables. Ann. Technol. Agric. 27, 367---375.
+#' 
+#' 6.  EBERMANN, Re; BARNA, J.; PRILLINGER, F.; 1972: Unterscheidung einiger Weißweinsorten durch Trennung der sorteneigenen Weinproteine auf Polyacrylamidgel. Mitt. Klosterneuburg 22, 414---420.
+#' 
+#' 7.  FORINA, M.; 1984: PARVUS. Trends in Analyt. Chem. 3, 38---39.
+#' 
+#'     ![](media/b48f702c43c741bdb9f840162950c0b8.jpg); LANTERI, S.; 1984: Data analysis in food chemistry. In: KOWALSKI, B.R. (Ed.): Chemometrics, Mathematics and Statistics in Chemistry. Nato ASI Series, Ser. C. Vol. 138, 305---349. Reidel Publ. Co., Dordrecht.
+#' 
+#' 8.  --- --- ; ------; CASTINO, M.; LEARDI, R.; 1985: Feature selection by stepwise Bayesian analysis. Atti VI Congresso Naz. --- Div. Chim. Anal., Soc. Chim. Ital., Bari, 24---29 setti 1985, 70---72.
+#' 
+#' 9.  GROTCH, S. L.; 1984: Three-dimensional graphics for scientist data display and analysis. In: KOWALSKI, B. R. (Ed.): Chemometrics, Mathematics and Statistics in Chemistry. Nato ASI Series, Ser. C. vol. 138, 439---466. Reidel Publ. co., Dordrecht.
+#' 
+#' 10. HARPER, A. M.; DUEWER, D. L.; KOWALSKI, B. R.; FASCHING, J. L.; 1977: ARTHUR and experimental data analysis: The heuristic use of a polyalgorithm. Chemometrics: Theory and Application. ACS Symposium Series 52, 14---52. Washington D. C.
+#' 
+#' 11. KAWAHARA, F. K.; SANTNER, J. F.; JULIAN, E. C.; 1974: Characterization of heavy residual fuel oils and asphalts by infrared spectrophotometry using statistical discriminant function analysis. Analyt. Chem. 46, 266---273.
+#' 
+#' 12. KWAN, W. 0.; KOWALSKI, B. R.; 1978: Classification of wines by applying pattern recognition to chemical composition data. J. Food Sci. 43, 1320---1323.
+#' 
+#' 13. --- ![](media/b7aa8f156cf19db6017b3847514674eb.jpg) SKOGERBOE, R. K.; 1979: Pattern recognition analysis of elemental data. Wines of Vitis vinifera cv. Pinot noir from France and the United States. J. Agricult. Food Chem. 27, 1321---1326.
+#' 
+#' 14. MALINOWSKI, E. R.; HOWERY, D. G.; 1980: Factor Analysis in Chemistry, 72---87. Wiley Interscience Publ., New York.
+#' 
+#' 15. MARAIS, J.; VAN ROOYEN, P. C.; DU PLESSIS, C. S.; 1981: Differentiation between wines originating from different red wine cultivars and wine regions by the application of stepwise discriminant analysis to gas chromatographic data. S. Afr. J. Enol. Viticult. 2, 19---23.
+#' 
+#' 16. --- ![](media/56e0ddaac465940a1d18fa133f511dd5.jpg) 1981: Classification of white cultivar wines by origin using volatile aroma components. S. Afr. J. Enol. Viticult. 2, 45---49.
+#' 
+#' 17. MORET, 1.; SCARPONI, G.; CAPODAGLIO, G.; ZANIN, S.; CAMAIANI, G.; TONIOLO, A.; 1980: Analytical parameters in the characterization of three Venetian wines. Application of the statistical linear discriminant analysis. Amer. J. Enol. Viticult. 31, 245---249.
+#' 
+#' 18. ![](media/951bbf2ace3488a35f31c601a47ad13a.jpg) CESCON, P.; 1984: Aroma components as discriminating parameters in the chemometric classification of Venetian white wines. J. Sci. Food Agricult. 35, 1004---1011.
+#' 
+#' 19. OOGHE, W.; KASTELIJN, H.; DE WAELE, A.; 1981: Détermination de l'origine d'un vin rouge å l'aide du spectre des acides aminés. Ann. Fals. Exp. Chim. 74, 381---408.
+#' 
+#' 20. RAPP, A.; 1984: Composants arömatiques du vin: Possibilités de classification et d'appréciation qualitative. Rev. Franc. Oenol. 93, 65---70.
+#' 
+#' 21. ![](media/6892f8bdc24feb2afc5e3418deb42e1c.jpg)GÜNTERT, M.; 1985: Beitrag zur Charakterisierung des Weines der Rebsorte Weißer Riesling. Il. Untersuchung der Aromastoffzusammensetzung deutscher Weißweine der Rebsorten Weißer Riesling, Müller-Thurgau und Silvaner. Vitis 24, 139---150.
+#' 
+#' 22. ---![](media/60987e5cff1fdec197d0a830d045c60a.jpg)HEIMANN, W.; 1985: Beitrag zur Sortencharakterisierung der Rebsorte Weißer Riesling. I. Untersuchung der Aromastoffzusammensetzung von ausländischen Weißweinen mit der Sortenbezeichnung „Riesling". Z. Lebensm.-Untersuch. u. Forsch. 181, 357---361.
+#' 
+#' 23. ---![](media/e34d644b8bb10ff4cb747545a7b96804.jpg)HASTRICH, H.; ENGEL, L.; 1977: Kapillarchromatographische Untersuchungen über die
+#' 
+#'     Aromastoffe von Wein und Weinbeeren. Möglichkeiten zur Sortencharakterisierung. Mitt. Klosterneuburg 27, 74---82.
+#' 
+#' 24. ---![](media/d32ee391b9e046a965ae5a83fab62f06.jpg)KNIPSER, W.; 1978: Possibilities of characterizing wine quality and wine varieties by means of capillary chromatography. In: CHARALAMBOUS, G.; INGLE"IT, G. E. (Eds): Flavor of Foods and Beverages, 391---417. Academic Press, New York.
+#' 
+#' 25. SCARPONI, G.; MORET, 1.; CAPODAGLIO, G.; 1981: Applicazione dell'analisi discriminante multipla nella differenziazione chimico-analitica di vini d'origine. Riv. Viticolt. Enol. 34, 254---266.
+#' 
+#' 26. SCHREIER, P.; DRAWERT, F.; JUNKER, A.; REINER, L.; 1978: Anwendung der multiplen Diskriminanzanalyse zur Differenzierung von Rebsorten an Hand der quantitativen Verteilung flüchtiger Weininhaltsstoffe. Mitt. Klosterneuburg 26, 225---234.
+#' 
+#' 27. SIEGMUND, H.; BACHMANN, K.; 1977: Die Lagezuordnung von Weinen durch Bestimmung des Spurenelementmusters. Z. Lebensm.-Untersuch. u. Forsch. 164, 1---7.
+#' 
+#' 28. STELLA, C.; SABATELLI, M. P.; VEDANA, A.; 1977: L'analisi discriminante nella tipicizzazione dei vini toscani. Vini d'ltalia 19, 31---33.
+#' 
+#' 29. TOU, J. T.; GONZALES, R. C.; 1974: Pattern Recognition Principles, 134. Addison-Wesley Publ. Co. London.
+#' 
+#' 30. --- --- ; 1974: Pattern Recognition Principles, 87. Addison-Wesley Publ. Co., London.
+#' 
+#' 31. UBIGLI, M.; BARBERO, L.; 1983: Studio chimico e fisico-chimico del Barolo. Vignevini 10 (10), 39---44.
+#' 
+#' 32. --- --- ; --- ---; CASTINO, M.; AMERIO, G.; 1979: Studio chimico e fisico-chimico del 'Grignolino d'Asti' D. O. C. Ann. 1st. sper. Enol. Asti 10, 1---20.
+#' 
+#' 33. --- ; CASTINO, M.; BARBERO, L.; 1983: Studio fisico e fisico-chimico del 'Barbera d'Asti' D. O. C. Riv. Viticolt. Enol. 36, 405---430.
+#' 
+#' 34. WOLFE, W. H.; 1976: Identification of grape varieties by isozyme banding patterns. Amer. J. Enol.
+#' 
+#'     Viticult. 27, 68---73.
+#' 
+#'     Eingegangen am 17. 1. 1986
+#' 
+#' Prof. M. FORINA
+#' 
+#' Istituto di Analisi e Tecnologie Farmaceutiche ed Alimentari
+#' 
+#' Via Brigata Salerno (ponte)
+#' 
+#' 16147 Genova
+#' 
+#' Italia
